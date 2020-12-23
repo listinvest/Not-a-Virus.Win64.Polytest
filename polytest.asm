@@ -1,17 +1,6 @@
 ;  <polytest.asm>   -   polytest source
 ;                         December 2020
 ;
-;  ToDo:
-;    - Recode the basic ciphers without lodsw and stosw
-;    - Continue exploring the logic of permuting using two random 
-;        registers (e.g. BlackBat)
-;
-;  ---------------------------- abstract ----------------------------
-;  This file contains a discussion of polymorphic engines, written
-;  as an individual learning exercise that may be shared with others
-;  for educational purposes.
-;  ------------------------------------------------------------------
-;
 ;           I. Introduction - the Components of the Engine
 ;
 ;  Distilling the poly engine into three components according to [1]:
