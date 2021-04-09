@@ -1,0 +1,1 @@
+uasm64.exe -q -win64 semantics.asm
