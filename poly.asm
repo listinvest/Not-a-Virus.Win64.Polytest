@@ -1,4 +1,4 @@
-;  <vir.asm>   -    polymorphism test program
+;  <poly.asm>   -    polymorphism test program
 ;                         April 2020
 ;
 ;
@@ -74,7 +74,7 @@
 option win64:0x08   ; init shadow space, reserve stack at PROC level
 option zerolocals:1 ; autozero local vairable memory
 
-include .\vir.inc
+include .\poly.inc
 
 ;-----------------------------------------------------------------------------
 ;  0. Macros, Structures, and Constants
@@ -130,7 +130,7 @@ TEXT$00 SEGMENT ALIGN(10h) 'code' READ WRITE EXECUTE
 ;-----------------------------------------------------------------------------
 ;  2. Permutation Engine
 ;-----------------------------------------------------------------------------
-vir_begin:
+poly_begin:
     PermutationEngine PROC
         local cipherOffset:qword
         local regTable:REG_TABLE
@@ -146,7 +146,7 @@ vir_begin:
     permute_op0:
         lea     rcx, offset simple_substitution_cipher_setup
         push    rcx
-        mov     edx, (offset vir_end - offset vir_begin) / 2 
+        mov     edx, (offset poly_end - offset poly_begin) / 2 
         lea     r8, regTable
         mov     r8d, [r8].REG_TABLE.LengthReg
         
@@ -169,7 +169,7 @@ vir_begin:
         lea     rcx, offset simple_substitution_cipher_setup
         add     rcx, ebx                    ; Address for next instruction
         push    rcx
-        lea     edx, offset vir_begin
+        lea     edx, offset poly_begin
         mov     r8d, [r8].REG_TABLE.SourceReg
         mov     ecx, 3
         call    rand_range
@@ -362,14 +362,14 @@ stable_end:
 
 ; End of encoded data.
 align 2
-vir_end:
+poly_end:
     ;  Simple substition cipher [3]
     ;
     simple_substitution_cipher:
         simple_substitution_cipher_setup:
-            mov     rcx, (offset vir_end - offset vir_begin) / 2 
+            mov     rcx, (offset poly_end - offset poly_begin) / 2 
                                                                 ;  op0. Calculate payload body size in words                         
-            mov     rbx, offset vir_begin                       ;  op1  Set source register. Source = start of encrypted code                                                                  
+            mov     rbx, offset poly_begin                       ;  op1  Set source register. Source = start of encrypted code                                                                  
             mov     rsi, rbx                                    ;  op1.                     
             mov     rdi, rsi                                    ;  op2. Set dest register, == source                             
             mov     rbx, 029Ah                                  ;  op4. rbx = key                                                                                                                                              

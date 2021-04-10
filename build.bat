@@ -1,5 +1,5 @@
-del vir.obj
-uasm64.exe -q -win64 vir.asm
+del poly.obj
+uasm64.exe -q -win64 poly.asm
 link.exe^
     /ERRORREPORT:PROMPT^
     /INCREMENTAL:NO^
@@ -13,4 +13,4 @@ link.exe^
     /NXCOMPAT^
     /MACHINE:X64^
     /SAFESEH:NO^
-    vir.obj
+    poly.obj
