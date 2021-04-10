@@ -1,3 +1,4 @@
+```asm
 ;  <poly.asm>   -    polymorphism test program
 ;                         April 2020
 ;
@@ -70,3 +71,4 @@
 ;       [2] https://bit.ly/39q4vyj
 ;       [3] https://vx-underground.org/archive/VxHeaven/lib/vmn04.html
 ;
+```
