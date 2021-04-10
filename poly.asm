@@ -1,7 +1,6 @@
 ;  <poly.asm>   -    polymorphism test program
 ;                         April 2020
 ;
-;
 ;   Brief: 
 ;
 ;      This assembly file contains code for a polymorphic encryption
