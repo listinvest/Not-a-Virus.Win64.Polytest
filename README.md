@@ -32,38 +32,31 @@
 ;       4. Stepping through each instruction in the 0th generation cipher,
 ;          the engine will select a semantically equivalent variant of 
 ;          that instruction, populate mod r/m and any immediates from the
-;          0th generation code. The loop maintains awareness of runtime
-;          dependencies when placing instructions in positions.
+;          0th generation code. The generation function doesn't change 
+;          the order of semantic operations. If it were to, it would also
+;          need to maintain awareness of the positional dependencies of
+;          each operation.
 ;
 ;       To facilitate this meta-awareness of the 0th generation code, this
 ;       program makes use of data structures describing the original
 ;       cipher. They are the following:
 ;   
-;       a. Semantic Registers Table: a table of registers, where each
+;       a. Registers Table: a table of registers, where each
 ;          position indicates a semantic purpose in the original cipher.
-;       b. Semantic Instruction Table: a table of instruction sequences
-;          delimeted by magic values where position indicates semantic
-;          purpose in the original cipher. Indexes dont match 1:1 with
-;          original cipher semantic operations.
-;       c. Cipher Semantics Table: a table who's ordinals indicate 
-;          semantic operations in the 0th generation cipher.
+;       c. Register Index Table: a table of indexes into the actual 
+;          Registers Table.
+;       c. Skeleton Instruction Table: a table containing opcodes and
+;          other information needed to generate valid instructions.
 ;       
 ;       To achieve the purposes of the algorithm in a clear way, the 
 ;       engine makes use of the following functions:
 ;   
-;       f. ShuffleRegisterTable: given a semantic register table data
+;       f. ShuffleRegisterTable: given a register table index data
 ;          structure, create a random ordering of phyiscal registers
-;       j. SelectInstruction: given an index into the cipher semantics
-;          table, choose a corresponding intruction sequence from the 
-;          semantic instruction table and populate it with the given
-;          register that corresponds with the index.
-;       k. RandRange: Get a random number in a specific range.
+;       j. RandRange: Get a random number in a specific range.
 ;
 ;   Notes:
 ;
-;       - This program uses its data section to store the semantic 
-;         instruction table. For an infector this would need to be 
-;         moved.
 ;       - In many cases simplicity is favored over completeness
 ;
 ;   References:
