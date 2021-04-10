@@ -3,6 +3,9 @@ option zerolocals:1 ; autozero local vairable memory
 
 TEXT$00 SEGMENT ALIGN(10h) 'code' READ WRITE EXECUTE
     Main PROC
+        push 32
+        push 30002
+
     simple_substitution_cipher:
         simple_substitution_cipher_setup:
             mov     rcx, (offset vir_end - offset vir_begin) / 2

