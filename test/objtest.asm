@@ -1,5 +1,4 @@
 option win64:0x08   ; init shadow space, reserve stack at PROC level
-option zerolocals:1 ; autozero local vairable memory
 
 TEXT$00 SEGMENT ALIGN(10h) 'code' READ WRITE EXECUTE
     Main PROC

