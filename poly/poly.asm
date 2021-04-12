@@ -120,39 +120,32 @@ poly_begin:
         xor     rbx, rbx            ; byte index
     permute_op0:
         lea     rcx, offset simple_substitution_cipher_setup
-        push    rcx
         mov     edx, (offset poly_end - offset poly_begin) / 2 
         lea     r8, regTable
         mov     r8d, [r8].REG_TABLE.LengthReg
-        
-        mov     rcx, 2
-        call    rand_range
-        test    eax, eax
-        jz      op0_t2
-        cmp     eax, 2
-        je      op0_t3
-        
-        op0_t1:          
-            pop     rcx  
-            call    GenMovImm32
-            jmp     permute_op1
-
-        op0_t2:
-            pop     rcx
-            call    GenMovImm64
-
-        op0_t3:
-            pop     rcx
-            push    r8
-            call    GenMovImm32
-            add     ebx, eax
-            pop     r8
-            call    GenPushReg            
+        call    GenMovImm64
 
     permute_op1:
         add     ebx, eax                    ; Add the address offset of the modified code
-
+        mov     rcx, offset simple_substitution_cipher
+        add     rcx, rbx                    ; Move to the next offset of the cipher
+        mov     edx, offset poly_begin      ; Pass the immediate to encode
+        lea     r8, regTable                ; Get the regTable
+        mov     r8d, [r8].REG_TABLE.SourceReg
+                                            ; Get the source register index from regTable
+        call    GenMovImm64                 ; Generate a MOV instruction at the target
+        add     ebx, eax                    ; Add the offset to the offset counter
+        mov     rcx, simple_substitution_cipher
+        add     rcx, rbx                    ; Get the next offset to generate at
+        lea     rdx, regTable               ; Get pointer to regTable
+        mov     r8d, [rdx].REG_TABLE.DestReg
+                                            ; Get dest register index in r8d
+        mov     edx, [rdx].REG_TABLE.SourceReg
+                                            ; Get source register index in edx
+        call    GenMovReg64                 ; Generate a MOV instruction for Src/Dst
+        add     ebx, eax                                   
     epilog:
+        call     simple_substitution_cipher
         pop     rsi
         pop     rbx
         ret
@@ -161,7 +154,7 @@ poly_begin:
     ; fastcall GenMov32(rcx=address, edx=value, r8d=index)
     GenMovImm32 PROC
         push    rbx
-        mov     al, byte ptr s_mov_mem_reg
+        mov     al, byte ptr s_mov_reg
                                             ; Load the opcode into al
         lea     rbx, s_regtable             ; Load the register value table
         or      al, byte ptr [rbx + r8]     ; OR the opcode with the value at the passed index
@@ -193,8 +186,8 @@ poly_begin:
     ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
     GenMovReg32 PROC
         push    rbx
-        mov     al, byte ptr s_mov_mem_reg  ; Set al to 0x89
-        mov     byte ptr [rcx + 1], al      ; Set the opcode
+        mov     al, byte ptr s_mov_reg  ; Set al to 0x89
+        mov     byte ptr [rcx], al      ; Set the opcode
         mov     al, byte ptr s_modrm        ; Get the modrm default byte
         lea     rbx, offset s_regtable      ; Get the register value table
         mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
@@ -203,7 +196,7 @@ poly_begin:
         lea     rbx, offset s_regtable      ; Get the register value table again
         mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
         or      al, bl                      ; OR the source into the Mod/RM
-        mov     byte ptr [rcx + 2], al      ; Set the newly generated Mod/RM byte
+        mov     byte ptr [rcx + 1], al      ; Set the newly generated Mod/RM byte
         mov     eax, 3                      ; This operation wrote three bytes
         pop     rbx                 
         ret
@@ -211,22 +204,11 @@ poly_begin:
 
     ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
     GenMovReg64 PROC
-        push    rbx
-        mov     al, byte ptr s_rex_prefix
+        mov     al, byte ptr s_rex_prefix   ; Get the REX prefix value
         mov     byte ptr [rcx], al          ; Set the REX prefix
-        mov     al, byte ptr s_mov_mem_reg  ; Set al to 0x89
-        mov     byte ptr [rcx + 1], al      ; Set the opcode
-        mov     al, byte ptr s_modrm        ; Get the modrm default byte
-        lea     rbx, offset s_regtable      ; Get the register value table
-        mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
-        shl     bl, 3                       ; Shift the dest into the dest bits of mod/rm
-        or      al, bl                      ; OR the dest into the mod/rm variable
-        lea     rbx, offset s_regtable      ; Get the register value table again
-        mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
-        or      al, bl                      ; OR the source into the Mod/RM
-        mov     byte ptr [rcx + 2], al      ; Set the newly generated Mod/RM byte
-        mov     eax, 3                      ; This operation wrote three bytes
-        pop     rbx                 
+        inc     rcx                         ; Increment RCX for function call
+        call    GenMovReg32                 ; Generate the MOV instruction
+        add     eax, 1                      ; Count the REX prefix            
         ret
     GenMovReg64 ENDP
 
@@ -245,7 +227,7 @@ poly_begin:
     ; fastcall GenPushReg(rcx=address, edx=reg_index)
     GenPopReg PROC
         push    rbx         
-        lea     rax, offset s_pop_reg      ; Get the POP opcode
+        lea     rax, offset s_pop_reg       ; Get the POP opcode
         lea     rbx, offset s_regtable      ; Get the regtable offset
         or      al, byte ptr [rbx + rdx]    ; Or the the POP opcode with [regtable + index]
         mov     byte ptr [rcx], al          ; Overwrite the original byte        
@@ -263,8 +245,8 @@ stable_begin:
         db 01001000b    ; 0x48 REX prefix
     s_mov64_imm:
         db 11000111b    ; 0xC7 ( +4 bytes for imm)
-    s_mov_mem_reg:
-        db 10001011b    ; 0x89 ( +1 byte for mem/reg), works for 32 and 64 bit. 
+    s_mov_reg:
+        db 10001001b    ; 0x89 ( +1 byte for mem/reg), works for 32 and 64 bit. 
                         ; Add REX for 64 bit. Inc Mod/RM to iterate through regs
     s_mov32_imm:
         db 10111000b    ; 0xB8 ( +4 bytes for imm)

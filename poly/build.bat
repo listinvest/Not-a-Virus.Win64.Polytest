@@ -13,4 +13,5 @@ link.exe^
     /NXCOMPAT^
     /MACHINE:X64^
     /SAFESEH:NO^
+    /LARGEADDRESSAWARE:NO^
     poly.obj
