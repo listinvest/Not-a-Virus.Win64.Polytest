@@ -189,10 +189,11 @@ poly_begin:
    
     permutation_test:   
         lea     rdx, regTable 
-        mov     edx, [rdx].REG_TABLE.SourceReg
+        mov     r8d, [rdx].REG_TABLE.SourceReg
         mov     rcx, simple_substitution_cipher
-        mov     r8, 3
-        call    GenDec
+        mov     edx, [rdx].REG_TABLE.DestReg
+        mov     r9, 1
+        call    GenTestReg
         add     ebx, eax                                   
     epilog:
         call    simple_substitution_cipher
@@ -360,6 +361,17 @@ poly_begin:
         pop     rbx
         ret
     GenDec ENDP
+
+    ; fasctall GenTest(rcx=address, edx=src_index, r8d=dst_index, r9=addressing_mode)
+    GenTestReg PROC
+        push    rbx
+        push    r10
+        call    GenSetMode                  ; Set the addressing mode
+        GenOpModRM s_test                    ; Set the opcode
+        pop     r10
+        pop     rbx
+        ret
+    GenTestReg ENDP
     
     ; polycall GenSetMode(r9=mode, r10=volatile)
     ;   r9=0 -> gen 32 bit 
@@ -439,6 +451,8 @@ stable_begin:
         db 00110000b    ; 0x30 (XOR). For 16 bit, add 16-bit prefix and inc 0x30.
     s_inc_reg:
         db 11111110b    ; 0xFE (INC)
+    s_test:
+        db 10000100b    ; 0x84 (TEST)
 
     ; Reg table is a list of indexes into this
     s_regtable:
