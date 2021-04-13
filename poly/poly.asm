@@ -93,12 +93,27 @@ ENDM
 
 ; Generate an opcode and Mod/RM byte for ops that
 ; use only a src reg
-GenOpModRMSingleReg MACRO opcode_label:REQ
+GenOpModRMSourceReg MACRO opcode_label:REQ
     add     al, byte ptr opcode_label   ; Get the opcode
     mov     byte ptr [rcx], al          ; Set the opcode         
     mov     al, byte ptr s_modrm        ; Get the Mod/RM default byte
     lea     rbx, offset s_regtable      ; Get the register value table
     mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
+    or      al, bl                      ; OR the source into Mod/RM
+    mov     byte ptr [rcx + 1], al      ; Set the new Mod/RM byte
+    pop     rax                         ; Get the byte count
+    add     eax, 2                      ; Add the count of bytes just written
+ENDM
+
+; Generate an opcode and Mod/RM byte for ops that
+; use only a dst reg
+GenOpModRMDestReg MACRO opcode_label:REQ
+    add     al, byte ptr opcode_label   ; Get the opcode
+    mov     byte ptr [rcx], al          ; Set the opcode         
+    mov     al, byte ptr s_modrm        ; Get the Mod/RM default byte
+    lea     rbx, offset s_regtable      ; Get the register value table
+    mov     bl, byte ptr [rbx + rdx]    ; Get the dest register by index
+    shl     bl, 3                       ; Shift the reg value into dest
     or      al, bl                      ; OR the source into Mod/RM
     mov     byte ptr [rcx + 1], al      ; Set the new Mod/RM byte
     pop     rax                         ; Get the byte count
@@ -177,7 +192,7 @@ poly_begin:
         mov     edx, [rdx].REG_TABLE.SourceReg
         mov     rcx, simple_substitution_cipher
         mov     r8, 3
-        call    GenInc
+        call    GenDec
         add     ebx, eax                                   
     epilog:
         call    simple_substitution_cipher
@@ -319,11 +334,32 @@ poly_begin:
         push    r10
         mov     r9, r8
         call    GenSetMode
-        GenOpModRMSingleReg s_inc_reg       ; Generate the byte sequence for the inc
+        GenOpModRMSourceReg s_inc_reg       ; Generate the byte sequence for the inc
         pop     r10
         pop     rbx
         ret
     GenInc ENDP
+
+    ; fastcall GenDec(rcx=address, edx=src_index, r8=addressing_mode)
+    GenDec PROC
+        push    rbx
+        push    r10
+        mov     r9, r8
+        call    GenSetMode
+        add     al, byte ptr s_inc_reg      ; Get the opcode
+        mov     byte ptr [rcx], al          ; Set the opcode         
+        mov     al, byte ptr s_modrm        ; Get the Mod/RM default byte
+        lea     rbx, offset s_regtable      ; Get the register value table
+        mov     bl, byte ptr [rbx + rdx]    ; Get the dest register by index
+        or      bl, 200                     ; Set the fourth bit to 1
+        or      al, bl                      ; OR the source into Mod/RM
+        mov     byte ptr [rcx + 1], al      ; Set the new Mod/RM byte
+        pop     rax                         ; Get the byte count
+        add     eax, 2                      ; Add the count of bytes just written
+        pop     r10
+        pop     rbx
+        ret
+    GenDec ENDP
     
     ; polycall GenSetMode(r9=mode, r10=volatile)
     ;   r9=0 -> gen 32 bit 
