@@ -188,12 +188,12 @@ poly_begin:
         jmp     permutation_test
    
     permutation_test:   
-        lea     rdx, regTable 
-        mov     r8d, [rdx].REG_TABLE.SourceReg
+        ;lea     rdx, regTable 
+        ;mov     r8d, [rdx].REG_TABLE.SourceReg
         mov     rcx, simple_substitution_cipher
-        mov     edx, [rdx].REG_TABLE.DestReg
-        mov     r9, 1
-        call    GenTestReg
+        xor     r8d, r8d
+        mov     edx, 0Fh
+        call    GenJCCRel8
         add     ebx, eax                                   
     epilog:
         call    simple_substitution_cipher
@@ -372,6 +372,25 @@ poly_begin:
         pop     rbx
         ret
     GenTestReg ENDP
+
+    ; fastcall GenJump(rcx=address, rdx=target, r8=mode)
+    ;   r9=0 -> jb/jc/jnae  r9=6 -> js          r9=C -> jle/jng
+    ;   r9=1 -> jae/jnb/jnc r9=7 -> jns         r9=D -> jg/jnle
+    ;   r9=2 -> je/js       r9=8 -> jp/jpe      
+    ;   r9=3 -> jne/jnz     r9=9 -> jnp/jpo
+    ;   r9=4 -> jbe/jna     r9=A -> jl/jlge
+    ;   r9=5 -> ja/jnbe     r9=B -> jnge/jnl
+    GenJCCRel8 PROC
+        push    rbx
+        mov     al, byte ptr s_jc           ; 0x74 (JE)
+        mov     ebx, r8d                    ; Move the mode into a byte addressable reg
+        or      al, bl                      ; Set the jump mode
+        mov     byte ptr [rcx], al          ; Write the jump byte
+        mov     byte ptr [rcx + 1], dl      ; Write the relative offset 
+        mov     eax, 2                      ; This operation wrote two bytes
+        pop     rbx
+        ret
+    GenJCCRel8 ENDP
     
     ; polycall GenSetMode(r9=mode, r10=volatile)
     ;   r9=0 -> gen 32 bit 
@@ -453,6 +472,8 @@ stable_begin:
         db 11111110b    ; 0xFE (INC)
     s_test:
         db 10000100b    ; 0x84 (TEST)
+    s_jc:
+        db 01110010b    ; 0x72 (JC)
 
     ; Reg table is a list of indexes into this
     s_regtable:
