@@ -72,18 +72,21 @@ include .\poly.inc
 ;-----------------------------------------------------------------------------
 
 ;-- Macros --;
-GenInstruction MACRO opcode_label:REQ
+
+; Generate an opcode and Mod/RM byte for the given 
+; label of an opcode
+GenOpModRM MACRO opcode_label:REQ
     add     al, byte ptr opcode_label   ; Get the opcode
     mov     byte ptr [rcx], al          ; Set the opcode         
-    mov     al, byte ptr s_modrm        ; Get the MOD/RM default byte
+    mov     al, byte ptr s_modrm        ; Get the Mod/RM default byte
     lea     rbx, offset s_regtable      ; Get the ragister value table address
     mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
     shl     bl, 3                       ; Shift the dest reg into the dest bits
     or      al, bl                      ; OR the dest into the MOD?RM
     lea     rbx, offset s_regtable      ; Get the register value table again
     mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
-    or      al, bl                      ; OR the source into MOD/RM
-    mov     byte ptr [rcx + 1], al      ; Set the new MOD/RM byte
+    or      al, bl                      ; OR the source into Mod/RM
+    mov     byte ptr [rcx + 1], al      ; Set the new Mod/RM byte
     pop     rax                         ; Get the byte count
 ENDM
 
@@ -199,15 +202,15 @@ poly_begin:
         call    GenSetMode                  ; Set the mode (8, 16, 32, 64)
         add     al, byte ptr s_mov_reg      ; Get the opcode
         mov     byte ptr [rcx], al          ; Set the opcode         
-        mov     al, byte ptr s_modrm        ; Get the MOD/RM default byte
+        mov     al, byte ptr s_modrm        ; Get the Mod/RM default byte
         lea     rbx, offset s_regtable      ; Get the ragister value table address
         mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
         shl     bl, 3                       ; Shift the dest reg into the dest bits
         or      al, bl                      ; OR the dest into the MOD?RM
         lea     rbx, offset s_regtable      ; Get the register value table again
         mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
-        or      al, bl                      ; OR the source into MOD/RM
-        mov     byte ptr [rcx + 1], al      ; Set the new MOD/RM byte
+        or      al, bl                      ; OR the source into Mod/RM
+        mov     byte ptr [rcx + 1], al      ; Set the new Mod/RM byte
         pop     rax                         ; Get the byte count
         pop     r10
         pop     rbx
@@ -269,7 +272,7 @@ poly_begin:
         call    GenSetMode
         add     al, byte ptr s_mov_dest_mem ; Add 0x88 to the previously set mode
         mov     byte ptr [rcx], al          ; Set the opcode
-        xor     al, al                      ; Clear the register (no MOD/rm needed)
+        xor     al, al                      ; Clear the register (no Mod/RM needed)
         lea     rbx, offset s_regtable      ; Load the register value table
         mov     bl, byte ptr [rbx + rdx]    ; Get the source register encoding by index
         shl     bl, 3                       ; Shift the dest into the dest bits of the
@@ -318,7 +321,7 @@ poly_begin:
         push    rbx
         push    r10
         call    GenSetMode
-        GenInstruction s_xor_reg
+        GenOpModRM s_xor_reg
         add     eax, 2                      ; Add the count of bytes just written
         pop     r10
         pop     rbx
