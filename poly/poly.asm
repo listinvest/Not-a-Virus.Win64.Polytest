@@ -71,6 +71,22 @@ include .\poly.inc
 ;  0. Macros, Structures, and Constants
 ;-----------------------------------------------------------------------------
 
+;-- Macros --;
+GenInstruction MACRO opcode_label:REQ
+    add     al, byte ptr opcode_label   ; Get the opcode
+    mov     byte ptr [rcx], al          ; Set the opcode         
+    mov     al, byte ptr s_modrm        ; Get the MOD/RM default byte
+    lea     rbx, offset s_regtable      ; Get the ragister value table address
+    mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
+    shl     bl, 3                       ; Shift the dest reg into the dest bits
+    or      al, bl                      ; OR the dest into the MOD?RM
+    lea     rbx, offset s_regtable      ; Get the register value table again
+    mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
+    or      al, bl                      ; OR the source into MOD/RM
+    mov     byte ptr [rcx + 1], al      ; Set the new MOD/RM byte
+    pop     rax                         ; Get the byte count
+ENDM
+
 ;-- Structs --;
 
 ; a. Semantic registers table
@@ -119,52 +135,18 @@ poly_begin:
         call    ShuffleRegTable
         xor     rbx, rbx                    ; byte index
         jmp     permutation_test
-    permute_op0:
-        lea     rcx, offset simple_substitution_cipher
-        mov     edx, (offset poly_end - offset poly_begin) / 2 
-        lea     r8, regTable
-        mov     r8d, [r8].REG_TABLE.LengthReg
-        call    GenMovImm64
-
-    permute_op1:
-        add     ebx, eax                    ; Add the address offset of the modified code
-        mov     rcx, offset simple_substitution_cipher
-        add     rcx, rbx                    ; Move to the next offset of the cipher
-        mov     edx, offset poly_begin      ; Pass the immediate to encode
-        lea     r8, regTable                ; Get the regTable
-        mov     r8d, [r8].REG_TABLE.SourceReg
-                                            ; Get the source register index from regTable
-        call    GenMovImm64                 ; Generate a MOV instruction at the target
-        add     ebx, eax                    ; Add the offset to the offset counter
-        mov     rcx, simple_substitution_cipher
-        add     rcx, rbx                    ; Get the next offset to generate at
-        lea     rdx, regTable               ; Get pointer to regTable
-        mov     r8d, [rdx].REG_TABLE.DestReg
-                                            ; Get dest register index in r8d
-        mov     edx, [rdx].REG_TABLE.SourceReg
-                                            ; Get source register index in edx
-        call    GenMovReg64                 ; Generate a MOV instruction for Src/Dst
-
-    permute_op2:
-        add     ebx, eax                    ; Add the offset to the offset counter
-        mov     rcx, simple_substitution_cipher
-        add     rcx, rbx                    ; Get the next offset to generate at
-        lea     rdx, regTable               ; Get pointer to regTable
-        mov     r8d, [rdx].REG_TABLE.KeyReg
-                                            ; Get dest register index in r8d
-        mov     edx, [rdx].REG_TABLE.SourceReg
-                                            ; Get source register index in edx
+   
     permutation_test:   
         lea     rdx, regTable 
         mov     r8d, [rdx].REG_TABLE.SourceReg
         mov     edx, [rdx].REG_TABLE.DestReg
         mov     rcx, simple_substitution_cipher
-        mov     r9, 3
-       ; fastcall GenXor(rcx=address, edx=src_index, r8d=dest_index, r9=variant);
-        ;   r9=0 -> gen 32 bit XOR
-        ;   r9=1 -> gen 64 bit XOR
-        ;   r9=2 -> gen 16 bit XOR 
-        ;   r9=3 -> gen 8 bit XOR
+        mov     r9, 2
+        ; fastcall GenMovReg(rcx=address, rdx=src_index, r8=dest_index, r9=mode)
+        ;   r9=0 -> gen 32 bit 
+        ;   r9=1 -> gen 64 bit 
+        ;   r9=2 -> gen 16 bit 
+        ;   r9=3 -> gen 8 bit
         call    GenXor
         add     ebx, eax                                   
     epilog:
@@ -206,55 +188,75 @@ poly_begin:
         ret
     GenMovImm64 ENDP
 
-    ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
-    GenMovReg32 PROC
+    ; fastcall GenMovReg(rcx=address, rdx=src_index, r8=dest_index, r9=mode)
+    ;   r9=0 -> gen 32 bit 
+    ;   r9=1 -> gen 64 bit 
+    ;   r9=2 -> gen 16 bit 
+    ;   r9=3 -> gen 8 bit
+    GenMovReg PROC
         push    rbx
-        mov     al, byte ptr s_mov_reg      ; Set al to 0x89
-        mov     byte ptr [rcx], al          ; Set the opcode
-        mov     al, byte ptr s_modrm        ; Get the modrm default byte
-        lea     rbx, offset s_regtable      ; Get the register value table
+        push    r10
+        call    GenSetMode                  ; Set the mode (8, 16, 32, 64)
+        add     al, byte ptr s_mov_reg      ; Get the opcode
+        mov     byte ptr [rcx], al          ; Set the opcode         
+        mov     al, byte ptr s_modrm        ; Get the MOD/RM default byte
+        lea     rbx, offset s_regtable      ; Get the ragister value table address
         mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
-        shl     bl, 3                       ; Shift the dest into the dest bits of mod/rm
-        or      al, bl                      ; OR the dest into the mod/rm variable
+        shl     bl, 3                       ; Shift the dest reg into the dest bits
+        or      al, bl                      ; OR the dest into the MOD?RM
         lea     rbx, offset s_regtable      ; Get the register value table again
         mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
-        or      al, bl                      ; OR the source into the Mod/RM
-        mov     byte ptr [rcx + 1], al      ; Set the newly generated Mod/RM byte
-        mov     eax, 2                      ; This operation wrote two bytes
-        pop     rbx                 
+        or      al, bl                      ; OR the source into MOD/RM
+        mov     byte ptr [rcx + 1], al      ; Set the new MOD/RM byte
+        pop     rax                         ; Get the byte count
+        pop     r10
+        pop     rbx
         ret
-    GenMovReg32 ENDP
+    GenMovReg ENDP
 
-    ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
-    GenMovReg64 PROC
-        mov     al, byte ptr s_rex_prefix   ; Get the REX prefix value
+    ; polycall GenSetMode(r9=mode, r10=volatile)
+    ;   r9=0 -> gen 32 bit 
+    ;   r9=1 -> gen 64 bit 
+    ;   r9=2 -> gen 16 bit 
+    ;   r9=3 -> gen 8 bit
+    GenSetMode PROC
+        pop     r10                         ; Really stupid stack hack
+                                            ; requires caller to save r10
+        xor     eax, eax
+        test    r9, r9
+        jz      genmode_32_pre
+        cmp     r9, 1
+        je      genmode_64
+        cmp     r9, 2
+        je      genmode_16
+        cmp     r9, 3
+        je      genmode_8
+        jmp     genmode_epilog
+    genmode_16:
+        mov     al, byte ptr s_16b_prefix   ; Get 0x66
+        mov     byte ptr [rcx], al          ; Set the 16-bit prefix
+        mov     rax, 1                      ; Set the XOR mode to add to 0x31
+        push    rax                         ; Save the byte count
+        inc     rcx                         ; Set the pointer to the next byte to write
+        jmp     genmode_epilog              ; Jump to the standard routine
+    genmode_8:
+        xor     rax, rax                    ; Clear RAX so that the ocunt is correct
+        push    rax                         ; Save the byte count
+        jmp     genmode_epilog              ; 8 bits is easy
+    genmode_64:
+        mov     al, byte ptr s_rex_prefix   ; Get 0x48
         mov     byte ptr [rcx], al          ; Set the REX prefix
-        inc     rcx                         ; Increment RCX for function call
-        call    GenMovReg32                 ; Generate the MOV instruction
-        inc     eax                         ; Count the REX prefix            
+        mov     rax, 1                      ; Prepare 1 to the opcode
+        push    rax                         ; Save the byte count for later
+        inc     rcx                         ; Increment the pointer to write to
+        jmp     genmode_epilog              ; Invoke the standard routine
+    genmode_32_pre:
+        push    rax
+        inc     eax
+    genmode_epilog:
+        push    r10                         ; Unhack the stack
         ret
-    GenMovReg64 ENDP
-
-    ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
-    GenMovReg16 PROC
-        mov     al, byte ptr s_16b_prefix   ; Get the 16-bit mode prefix
-        mov     byte ptr [rcx], al          ; Set the mode prefix
-        inc     rcx                         ; Move address pointer to next byte
-        call    GenMovReg32                 ; Generate the MOV
-        inc     eax                         ; Count the added prefix
-        ret
-    GenMovReg16 ENDP
-
-
-    ; fastcall GenMovRegPtr8(rcx=address, rdx=src_index, r8=dest_index)
-    GenMovReg8 PROC
-        mov     al, byte ptr s_8b_prefix    ; Get the 16-bit mode prefix
-        mov     byte ptr [rcx], al          ; Set the mode prefix
-        inc     rcx                         ; Move address pointer to next byte
-        call    GenMovReg32                 ; Generate the MOV
-        inc     eax                         ; Count the added prefix
-        ret
-    GenMovReg8 ENDP
+    GenSetMode ENDP
 
     ; fastcall GenMovRegPtr32(rcx=address, rdx=src_index, r8=dest_index, r9=bool_direction)
     ;   r9=0 -> gen 32 bit MOV
@@ -263,38 +265,8 @@ poly_begin:
     ;   r9=3 -> gen 8 bit MOV
     GenMovDestMem PROC
         push    rbx
-        xor     eax, eax
-        test    r9, r9
-        jz      movdest_32_pre
-        cmp     r9, 1
-        je      movdest_64
-        cmp     r9, 2
-        je      movdest_16
-        cmp     r9, 3
-        je      movdest_8
-        jmp     movdest_epilog
-    movdest_16:
-        mov     al, byte ptr s_16b_prefix   ; Get 0x66
-        mov     byte ptr [rcx], al          ; Set the 16-bit prefix
-        mov     rax, 1                      ; Set the mov mode +1
-        push    rax                         ; Save the byte count
-        inc     rcx                         ; Set the pointer to the next byte to count
-        jmp     movdest_32                  ; Jump to the standard routine
-    movdest_8:
-        xor     rax, rax                    ; Clear RAX so the MOV mode is correct
-        push    rax                         ; Save the byte count
-        jmp     movdest_32                  ; Jump to the standard routine
-    movdest_64:
-        mov     al, byte ptr s_rex_prefix   ; Get 0x48
-        mov     byte ptr [rcx], al          ; Set the REX prefix
-        inc     rcx                         ; Set the pointer to the next byte
-        mov     rax, 1                      ; Set the byte count / mode
-        push    rax                         ; Save the byte count / mode
-        jmp     movdest_32
-    movdest_32_pre:
-        push    rax
-        inc     eax
-    movdest_32:
+        push    r10
+        call    GenSetMode
         add     al, byte ptr s_mov_dest_mem ; Add 0x88 to the previously set mode
         mov     byte ptr [rcx], al          ; Set the opcode
         xor     al, al                      ; Clear the register (no MOD/rm needed)
@@ -308,11 +280,10 @@ poly_begin:
         mov     byte ptr [rcx +1], al       ; Set the new mov target byte
         pop     rax                         ; Retrieve the byte count
         add     eax, 2                      ; Add the count of bytes just written
-    movdest_epilog:
+        pop     r10
         pop     rbx                         
         ret
     GenMovDestMem ENDP
-
 
     ; fastcall GenPushReg(rcx=address, edx=reg_index)
     GenPushReg PROC
@@ -345,52 +316,11 @@ poly_begin:
     ;   r9=3 -> gen 8 bit XOR
     GenXor PROC
         push    rbx
-        xor     eax, eax
-        test    r9, r9
-        jz      xor_32_pre
-        cmp     r9, 1
-        je      xor_64
-        cmp     r9, 2
-        je      xor_16
-        cmp     r9, 3
-        je      xor_8
-        jmp     xor_epilog
-    xor_16:
-        mov     al, byte ptr s_16b_prefix   ;
-        mov     byte ptr [rcx], al          ; Set the 16-bit prefix
-        mov     rax, 1                      ; Set the XOR mode to add to 0x31
-        push    rax                         ; Save the byte count
-        inc     rcx                         ; Set the pointer to the next byte to write
-        jmp     xor_32                      ; Jump to the standard routine
-    xor_8:
-        xor     rax, rax                    ; Clear RAX so that the count is correct
-        push    rax                         ; Save the byte count
-        jmp     xor_32                      ; 8 bits is easy for XOR
-    xor_64:
-        mov     al, byte ptr s_rex_prefix   ;
-        mov     byte ptr [rcx], al          ; Set the REX prefix
-        mov     rax, 1                      ; Set XOR mode to add to 0x31
-        push    rax                         ; Save this number of bytes written for later
-        inc     rcx
-        jmp     xor_32
-    xor_32_pre:
-        push    rax
-        inc     eax
-    xor_32:
-        add     al, byte ptr s_xor_reg      ; Add 0x30. This will account for bits set in other modes
-        mov     byte ptr [rcx], al          ; Set the opcode
-        mov     al, byte ptr s_modrm        ; Get the MOD/RM default byte
-        lea     rbx, offset s_regtable
-        mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
-        shl     bl, 3                       ; Shift the dest reg into the dest bits of MOD/RM
-        or      al, bl                      ; OR the dest into the MOD?RM
-        lea     rbx, offset s_regtable      ; Get the register value table again
-        mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
-        or      al, bl                      ; OR the source into MOD/RM
-        mov     byte ptr [rcx + 1], al      ; Set the new MOD/RM byte
-        pop     rax                         ; Get the byte count
+        push    r10
+        call    GenSetMode
+        GenInstruction s_xor_reg
         add     eax, 2                      ; Add the count of bytes just written
-    xor_epilog:
+        pop     r10
         pop     rbx
         ret
     GenXor ENDP

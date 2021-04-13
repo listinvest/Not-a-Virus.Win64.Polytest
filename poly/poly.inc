@@ -59,4 +59,54 @@ _VIR_INC EQU <1>
     ;     ret
     ; GenMovRegPtr8 ENDP
 
+    ; ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
+    ; GenMovReg32 PROC
+    ;     push    rbx
+    ;     mov     al, byte ptr s_mov_reg      ; Set al to 0x89
+    ;     mov     byte ptr [rcx], al          ; Set the opcode
+    ;     mov     al, byte ptr s_modrm        ; Get the modrm default byte
+    ;     lea     rbx, offset s_regtable      ; Get the register value table
+    ;     mov     bl, byte ptr [rbx + r8]     ; Get the dest register encoding by index
+    ;     shl     bl, 3                       ; Shift the dest into the dest bits of mod/rm
+    ;     or      al, bl                      ; OR the dest into the mod/rm variable
+    ;     lea     rbx, offset s_regtable      ; Get the register value table again
+    ;     mov     bl, byte ptr [rbx + rdx]    ; Get the source by index
+    ;     or      al, bl                      ; OR the source into the Mod/RM
+    ;     mov     byte ptr [rcx + 1], al      ; Set the newly generated Mod/RM byte
+    ;     mov     eax, 2                      ; This operation wrote two bytes
+    ;     pop     rbx                 
+    ;     ret
+    ; GenMovReg32 ENDP
+
+    ; ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
+    ; GenMovReg64 PROC
+    ;     mov     al, byte ptr s_rex_prefix   ; Get the REX prefix value
+    ;     mov     byte ptr [rcx], al          ; Set the REX prefix
+    ;     inc     rcx                         ; Increment RCX for function call
+    ;     call    GenMovReg32                 ; Generate the MOV instruction
+    ;     inc     eax                         ; Count the REX prefix            
+    ;     ret
+    ; GenMovReg64 ENDP
+
+    ; ; fastcall GenMovReg32(rcx=address, rdx=src_index, r8=dest_index)
+    ; GenMovReg16 PROC
+    ;     mov     al, byte ptr s_16b_prefix   ; Get the 16-bit mode prefix
+    ;     mov     byte ptr [rcx], al          ; Set the mode prefix
+    ;     inc     rcx                         ; Move address pointer to next byte
+    ;     call    GenMovReg32                 ; Generate the MOV
+    ;     inc     eax                         ; Count the added prefix
+    ;     ret
+    ; GenMovReg16 ENDP
+
+
+    ; ; fastcall GenMovRegPtr8(rcx=address, rdx=src_index, r8=dest_index)
+    ; GenMovReg8 PROC
+    ;     mov     al, byte ptr s_8b_prefix    ; Get the 16-bit mode prefix
+    ;     mov     byte ptr [rcx], al          ; Set the mode prefix
+    ;     inc     rcx                         ; Move address pointer to next byte
+    ;     call    GenMovReg32                 ; Generate the MOV
+    ;     inc     eax                         ; Count the added prefix
+    ;     ret
+    ; GenMovReg8 ENDP
+
 ENDIF
