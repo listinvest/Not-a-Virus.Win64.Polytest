@@ -172,6 +172,19 @@ TEXT$00 SEGMENT ALIGN(10h) 'code' READ WRITE EXECUTE
 ;-----------------------------------------------------------------------------
 ;  2. Permutation Engine
 ;-----------------------------------------------------------------------------
+; --- 0th Generation Cipher ---
+; 48 C7 C1 E0 01 00 00
+; 48 BB 16 10 B1 00 00 00 00 00
+; 48 8B F3
+; 48 8B FE
+; 48 C7 C3 9A 02 00 00
+; 66 8B 06
+; 66 33 C3
+; 66 89 06
+; 48 FF C6
+; 48 FF C9
+; 48 85 C9
+; 75 E9
 poly_begin:
     PermutationEngine PROC
         local cipherOffset:qword
@@ -179,22 +192,11 @@ poly_begin:
         local xorKey:byte
         push    rbx
         push    rsi
-
         mov     rax, offset simple_substitution_cipher
         mov     cipherOffset, rax
         lea     rcx, regTable
         call    ShuffleRegTable
-        xor     rbx, rbx                    ; byte index
-        jmp     permutation_test
-   
-    permutation_test:   
-        ;lea     rdx, regTable 
-        ;mov     r8d, [rdx].REG_TABLE.SourceReg
-        mov     rcx, simple_substitution_cipher
-        mov     r8d, 1
-        mov     edx, 0Fh
-        call    GenJmpRel8
-        add     ebx, eax                                   
+                                    
     epilog:
         call    simple_substitution_cipher
         pop     rsi
