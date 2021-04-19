@@ -190,12 +190,173 @@ poly_begin:
         local cipherOffset:qword
         local regTable:REG_TABLE
         local xorKey:byte
+        local keySize:dword
         push    rbx
         push    rsi
         mov     rax, offset simple_substitution_cipher
         mov     cipherOffset, rax
         lea     rcx, regTable
         call    ShuffleRegTable
+        xor     ebx, ebx
+    ; Set the source register to the offset of the encoded portion
+    permute_op1:
+        mov     rcx, 1                      ; We'll have two potential instructions for this op
+        call    rand_range            
+        mov     ecx, offset simple_substitution_cipher
+        add     ecx, ebx              
+        test    eax, eax
+        jz      op1_beta
+        ; Generate an immediate 64 bit mov into a yet unused register before setting dest reg
+        op1_alpha:                          ; Case rand_range returned 1
+            mov     rdx, offset poly_begin
+            mov     r8d, regTable.REG_TABLE.KeyReg
+            call    GenMovImm64_64
+            add     ebx, eax
+            mov     rcx, simple_substitution_cipher
+            add     rcx, rbx
+            mov     edx, regTable.REG_TABLE.SourceReg
+            mov     r8d, regTable.REG_TABLE.KeyReg
+            mov     r9, 1
+            call    GenMovReg            
+            add     ebx, eax
+            jmp     permute_op2
+        op1_beta:                           ; Case rand_range returned 0
+            mov     rdx, offset poly_begin
+            mov     r8d, regTable.REG_TABLE.SourceReg
+            call    GenMovImm64_64
+            add     ebx, eax
+    ; Set the key register to the random key. Determines keysize
+    permute_op2:
+        mov     ecx, 3
+        call    rand_range
+        mov     ecx, offset simple_substitution_cipher
+        add     ecx, ebx
+        rdrand  rdx
+        mov     r8d, regTable.REG_TABLE.KeyReg
+        test    eax, eax
+        jz      op2_epsilon
+        cmp     eax, 3
+        je      op2_delta
+        cmp     eax, 2
+        je      op2_gamma
+        cmp     eax, 1
+        je      op2_beta 
+
+        ; Generate movabs
+        op2_alpha: 
+            call    GenMovImm64_64
+            add     ebx, eax
+            mov     keySize, 3
+            jmp     permute_op3         
+        ; Generate 64 bit DWORD mov
+        op2_beta:
+            call    GenMovImm64_32
+            add     ebx, eax
+            mov     keySize, 4
+            jmp     permute_op3
+        ; Generate 32 bit DWORD mov
+        op2_gamma:
+            call    GenMovImm32
+            add     ebx, eax
+            mov     keySize, 4
+            jmp     permute_op3
+
+        ; Generate 16 bit mov
+        op2_delta:
+            call    GenMovImm16
+            add     ebx, eax
+            mov     keySize, 2
+            jmp     permute_op3
+
+        ; Generate 8 bit mov
+        op2_epsilon:
+            call    GenMovImm8
+            mov     keySize, 1
+            add     ebx, eax
+
+     ; Set the length register to the size in whatever unit was selected in op2
+    permute_op3:
+        mov     rcx, 3                      ; We'll have three potential instructions for this op
+        call    rand_range                  
+        mov     rcx, offset simple_substitution_cipher          
+        mov     r15, rax
+        mov     r14, rbx
+        mov     eax, (offset poly_end - offset poly_begin) 
+        mov     ebx, [keySize]
+        test    ebx, ebx
+        jz      keysize_set
+        xor     edx, edx
+        div     rbx
+        mov     edx, eax
+        mov     rbx, r14
+        mov     rax, r15
+        keysize_set:
+        mov     r8d, regTable.REG_TABLE.LengthReg
+        test    eax, eax
+        jz      op3_delta
+        cmp     eax, 1
+        je      op3_gamma
+        cmp     eax, 2
+        je      op3_beta
+        ; Generate the original byte sequence from 0th generation cipher
+        op3_alpha:                          ; Case rand_range returned 3
+            call    GenMovImm64_64
+            add     ebx, eax
+            jmp     permute_op4
+        ; Generate 32-bit x64  variant
+        op3_beta:                           ; Case rand_range returned 2
+            call    GenMovImm64_32
+            add     ebx, eax
+            jmp     permute_op4
+        ; Generate 32-bit variant
+        op3_gamma:                          ; Case rand_range returned 1
+            call    GenMovImm32
+            add     ebx, eax
+        ; Generate 16-bit variant            
+        op3_delta:                          ; Case rand_range returned 0
+            call    GenMovImm16
+            add     ebx, eax
+
+    ; i. Set the encryption register to the data to encrypt
+    ; ii. Xor the value
+    ; iii. Write the value back
+    ; alpha: keysize 32
+    ; beta: keysize 16
+    ; gamma: keysize 8
+    permute_op4:
+        mov     rcx, 3
+        call    rand_range        
+        mov     ecx, offset simple_substitution_cipher
+        add     ecx, ebx
+        mov     edx, regTable.REG_TABLE.SourceReg
+        mov     r8d, regTable.REG_TABLE.DestReg
+        test    eax, eax
+        jz      op4_gamma
+        cmp     eax, 2
+        je      op4_beta
+
+        ; Encrypt in dwords
+        op4_alpha:
+        ; fastcall GenMovDestMem(rcx=address, rdx=src_index, r8=dest_index, r9=mode)
+        xor     r9, r9
+        call    GenMovDestMem
+        add     ebx, eax
+
+        ; Encrypt in words
+        op4_beta:
+        mov     r9, 2
+        call    GenMovDestMem
+        add     ebx, eax
+
+        ; Encrypt in bytes
+        op4_gamma: 
+        mov     r9, 3
+        call    GenMovDestMem
+        add     ebx, eax
+
+    permute_op5:
+
+
                                     
     epilog:
         call    simple_substitution_cipher
@@ -210,7 +371,6 @@ poly_begin:
     ; fastcall GenMov32(rcx=address, edx=value, r8=index)
     GenMovImm64_32 PROC
         push    rbx
-        push    r10
         mov     al, byte ptr s_rex_prefix
         mov     byte ptr [rcx], al          ; Set the REX prefix at address + 0
         mov     al, byte ptr s_mov64_imm32
@@ -228,31 +388,27 @@ poly_begin:
     ; fastcall GenMov32(rcx=address, rdx=value, r8=index)
     GenMovImm64_64 PROC
         push    rbx
-        push    r10
         mov     al, byte ptr s_rex_prefix
         mov     byte ptr [rcx], al          ; Set the REX prefix at address + 0
         mov     al, byte ptr s_mov64_imm64
-        mov     byte ptr [rcx + 1], al      ; Set the MOV opcode at address + 1
-        mov     al, byte ptr s_modrm        ; Get a Mod/RM byte
         lea     rbx, offset s_regtable        
         or      al, byte ptr [rbx + r8]     ; OR the Mod RM byte with the proper register
-        mov     byte ptr [rcx + 2], al      ; Set the Mod/RM byte at address + 2
-        mov     qword ptr [rcx + 3], rdx    ; Set the immediate value at address + 3
+        mov     byte ptr [rcx + 1], al      ; Set the MOV opcode at address + 1
+        mov     qword ptr [rcx + 2], rdx    ; Set the immediate value at address + 3
         pop     rbx
-        mov     eax, 7
+        mov     eax, 10
         ret
     GenMovImm64_64 ENDP
 
     ; fastcall GenMov32(rcx=address, edx=value, r8d=index)
     GenMovImm32 PROC
         push    rbx
-        mov     al, byte ptr s_mov_reg
+        mov     al, byte ptr s_mov32_imm
                                             ; Load the opcode into al
         lea     rbx, s_regtable             ; Load the register value table
         or      al, byte ptr [rbx + r8]     ; OR the opcode with the value at the passed index
         mov     byte ptr [rcx], al          ; Set the first byte at address to the opcode
-        inc     rcx                         ; Move the address pointer to the next byte
-        mov     dword ptr [rcx], edx        ; Set the immediate value to opcode to 'value'
+        mov     dword ptr [rcx + 1], edx        ; Set the immediate value to opcode to 'value'
         pop     rbx         
         mov     rax, 5                      ; Return the number of bytes modified
         ret
@@ -268,6 +424,7 @@ poly_begin:
         or      al, byte ptr [rbx + r8]     ; OR the opcode with the value at the passed index
         mov     byte ptr [rcx + 1], al      ; Set the first byte at address to the opcode
         mov     word ptr [rcx + 2], dx      ; Set the immediate value to opcode to 'value'
+        mov     eax, 3                      ; This routine wrote 3 bytes
         pop     rbx
         ret
     GenMovImm16 ENDP
@@ -493,7 +650,7 @@ stable_begin:
     s_mov64_imm32:
         db 11000111b    ; 0xC7 ( +4 bytes for imm)
     s_mov64_imm64:
-        db 10111011b    ; 0xBB ( +8 bytes for imm)
+        db 10111000b    ; 0xB8 ( +8 bytes for imm)
     s_mov32_imm:
         db 10111000b    ; 0xB8 ( +4 bytes for imm)
     s_mov8_imm:
