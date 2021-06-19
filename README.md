@@ -1,6 +1,6 @@
 # Not-A-Virus.Win64.Polytest
 
-Work-in-progress self-modifying crypter.
+Work-in-progress self-modifying crypter. Still all very much a rough draft
 
 
 ## Brief: 
