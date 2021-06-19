@@ -312,6 +312,7 @@ poly_begin:
         op3_gamma:                          ; Case rand_range returned 1
             call    GenMovImm32
             add     ebx, eax
+            jmp     permute_op4
         ; Generate 16-bit variant            
         op3_delta:                          ; Case rand_range returned 0
             call    GenMovImm16
@@ -337,22 +338,22 @@ poly_begin:
 
         ; Encrypt in dwords
         op4_alpha:
-        ; fastcall GenMovDestMem(rcx=address, rdx=src_index, r8=dest_index, r9=mode)
-        xor     r9, r9
-        call    GenMovDestMem
-        add     ebx, eax
+            ; fastcall GenMovDestMem(rcx=address, rdx=src_index, r8=dest_index, r9=mode)
+            xor     r9, r9
+            call    GenMovDestMem
+            add     ebx, eax
 
         ; Encrypt in words
         op4_beta:
-        mov     r9, 2
-        call    GenMovDestMem
-        add     ebx, eax
+            mov     r9, 2
+            call    GenMovDestMem
+            add     ebx, eax
 
         ; Encrypt in bytes
         op4_gamma: 
-        mov     r9, 3
-        call    GenMovDestMem
-        add     ebx, eax
+            mov     r9, 3
+            call    GenMovDestMem
+            add     ebx, eax
 
     permute_op5:
 
@@ -786,7 +787,7 @@ poly_end:
         mov     ax, word ptr [rsi]                          ;  Essentially lodsw but better able to permutate      
         xor     ax, bx                                      ;  The fundamental cipher operation          
         mov     word ptr [rsi], ax                          ;  Could also be RDI  
-        inc     rsi
+        inc     rsi                                         ;  Increment twice / for word
         inc     rsi      
         dec     rcx
         test    rcx, rcx
