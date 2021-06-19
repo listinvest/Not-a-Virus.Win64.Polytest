@@ -42,22 +42,22 @@ To facilitate this meta-awareness of the 0th generation code, this
 program makes use of data structures describing the original
 cipher. They are the following:
 
-a. Registers Table: a table of registers, where each
-position indicates a semantic purpose in the original cipher.
+   a. Registers Table: a table of registers, where each
+   position indicates a semantic purpose in the original cipher.
 
-c. Register Index Table: a table of indexes into the actual 
-Registers Table.
+   c. Register Index Table: a table of indexes into the actual 
+   Registers Table.
 
-c. Skeleton Instruction Table: a table containing opcodes and
-other information needed to generate valid instructions.
+   c. Skeleton Instruction Table: a table containing opcodes and
+   other information needed to generate valid instructions.
 
  To achieve the purposes of the algorithm in a clear way, the 
  engine makes use of the following functions:
 
- f. ShuffleRegisterTable: given a register table index data
+   f. ShuffleRegisterTable: given a register table index data
     structure, create a random ordering of phyiscal registers
-    
- j. RandRange: Get a random number in a specific range.
+
+   j. RandRange: Get a random number in a specific range.
 
    Notes:
 
