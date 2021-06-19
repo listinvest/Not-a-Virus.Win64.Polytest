@@ -1,3 +1,5 @@
+Work-in-progress self-modifying crypter.
+
 ```asm
 ;  <poly.asm>   -    polymorphism test program
 ;                         April 2020
